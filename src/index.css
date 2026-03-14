@@ -1,0 +1,127 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Cairo", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --color-charcoal: #2C2C2C;
+  --color-gold: #C5A059;
+  --color-offwhite: #F8F8F8;
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 97%; /* #F8F8F8 */
+    --foreground: 0 0% 17%; /* #2C2C2C */
+  }
+
+  body {
+    background-color: var(--color-offwhite);
+    color: var(--color-charcoal);
+    font-family: "Cairo", sans-serif;
+  }
+}
+
+/* --- أضف هذا الكود في نهاية ملف index.css --- */
+
+/* 1. هندسة الخلفية الديناميكية (شلال الألوان) */
+.dynamic-background {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  z-index: -10;
+}
+
+.stripe {
+  flex: 1;
+  height: 100%;
+  background-size: 100% 600%;
+  animation: flowColors 24s infinite cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* الباليتات المتناقضة التي اتفقنا عليها */
+.stripe-1 {
+  background-image: linear-gradient(to bottom, 
+      #8C7A9E 0%, #8C7A9E 14%,       
+      #1B3B36 16.6%, #1B3B36 30.6%,  
+      #2C3E50 33.3%, #2C3E50 47.3%,  
+      #F8F9FA 50%, #F8F9FA 64%,      
+      #591829 66.6%, #591829 80.6%,  
+      #EAE0D5 83.3%, #EAE0D5 97.3%,  
+      #8C7A9E 100%);
+  animation-delay: 0s;
+}
+
+.stripe-2 {
+  background-image: linear-gradient(to bottom, 
+      #F4E06D 0%, #F4E06D 14%,       
+      #D4AF37 16.6%, #D4AF37 30.6%,  
+      #E07A5F 33.3%, #E07A5F 47.3%,  
+      #343A40 50%, #343A40 64%,      
+      #F2C9D8 66.6%, #F2C9D8 80.6%,  
+      #0A2342 83.3%, #0A2342 97.3%,  
+      #F4E06D 100%);
+  animation-delay: 0.2s;
+}
+
+.stripe-3 {
+  background-image: linear-gradient(to bottom, 
+      #8AB4F8 0%, #8AB4F8 14%,       
+      #F5F0E6 16.6%, #F5F0E6 30.6%,  
+      #F4F1DE 33.3%, #F4F1DE 47.3%,  
+      #A67C52 50%, #A67C52 64%,      
+      #1A1A1A 66.6%, #1A1A1A 80.6%,  
+      #C6AC8F 83.3%, #C6AC8F 97.3%,  
+      #8AB4F8 100%);
+  animation-delay: 0.4s;
+}
+
+.stripe-4 {
+  background-image: linear-gradient(to bottom, 
+      #E6A8D7 0%, #E6A8D7 14%,       
+      #8B5A2B 16.6%, #8B5A2B 30.6%,  
+      #81B29A 33.3%, #81B29A 47.3%,  
+      #D0D0D0 50%, #D0D0D0 64%,      
+      #D9B382 66.6%, #D9B382 80.6%,  
+      #175676 83.3%, #175676 97.3%,  
+      #E6A8D7 100%);
+  animation-delay: 0.6s;
+}
+
+@keyframes flowColors {
+  0%, 14% { background-position: 0% 0%; } 
+  16.6%, 30% { background-position: 0% 20%; } 
+  33.3%, 47% { background-position: 0% 40%; } 
+  50%, 64% { background-position: 0% 60%; } 
+  66.6%, 80% { background-position: 0% 80%; } 
+  83.3%, 97% { background-position: 0% 100%; } 
+  100% { background-position: 0% 0%; } 
+}
+
+/* 2. تأثيرات الزجاج الفاخر للنوافذ والهيدر */
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 20px;
+  padding: 25px;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+  transition: transform 0.4s, background 0.4s;
+}
+
+.glass-card:hover {
+  transform: translateY(-10px);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.glass-panel-dark {
+  background: rgba(255, 255, 255, 0.75) !important; /* تغلب على لون الأداة القديم */
+  backdrop-filter: blur(15px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+  color: #2C2C2C !important;
+}
