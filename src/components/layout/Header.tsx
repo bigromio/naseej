@@ -1,66 +1,96 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ShoppingCart, User, Globe, Menu } from 'lucide-react';
+import { ShoppingBag, User, Globe } from 'lucide-react';
 import { useStore } from '@/store/useStore';
-import { translations } from '@/i18n/translations';
-import { cn } from '@/lib/utils';
+import logoImg from '@/assets/logo.png'; // استدعاء صورة الشعار الجديد
 
-export const Header = ({ isTransparent = false }: { isTransparent?: boolean }) => {
-  const { language, setLanguage, cart, user } = useStore();
-  const t = translations[language];
+// مكون اللوجو الديناميكي المتساقط (النص فقط)
+const DynamicLogoText = () => {
+  const [phase, setPhase] = useState(0); 
 
-  const toggleLanguage = () => {
-    setLanguage(language === 'ar' ? 'en' : 'ar');
-  };
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    if (phase === 0) timeout = setTimeout(() => setPhase(1), 2500); // بقاء العربي
+    else if (phase === 1) timeout = setTimeout(() => setPhase(2), 1200); // سقوط وتغيير
+    else if (phase === 2) timeout = setTimeout(() => setPhase(3), 2500); // بقاء الإنجليزي
+    else if (phase === 3) timeout = setTimeout(() => setPhase(0), 1200); // ارتفاع وعودة
+    return () => clearTimeout(timeout);
+  }, [phase]);
 
-  const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
+  const wordEn = "NASEEJ".split('');
 
   return (
-    <header className={cn(
-      "fixed top-0 w-full z-50 transition-all duration-300",
-      isTransparent ? "bg-transparent text-white" : "glass-panel-dark text-white shadow-md"
-    )}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-20">
-          <div className="flex items-center">
-            <Link to="/" className="font-serif text-2xl font-bold tracking-wider">
-              NASEEJ <span className="text-gold">نسيج</span>
-            </Link>
-          </div>
-
-          <nav className="hidden md:flex space-x-8 rtl:space-x-reverse">
-            <Link to="/" className="hover:text-gold transition-colors">{t.home}</Link>
-            <Link to="/shop" className="hover:text-gold transition-colors">{t.shop}</Link>
-            {user?.role === 'admin' && (
-              <Link to="/admin" className="hover:text-gold transition-colors">{t.admin}</Link>
-            )}
-          </nav>
-
-          <div className="flex items-center space-x-4 rtl:space-x-reverse">
-            <button onClick={toggleLanguage} className="p-2 hover:text-gold transition-colors flex items-center gap-1">
-              <Globe size={20} />
-              <span className="text-sm font-medium">{language === 'ar' ? 'EN' : 'عربي'}</span>
-            </button>
-            
-            <Link to="/checkout" className="p-2 hover:text-gold transition-colors relative">
-              <ShoppingCart size={20} />
-              {cartCount > 0 && (
-                <span className="absolute top-0 right-0 bg-gold text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
-                  {cartCount}
-                </span>
-              )}
-            </Link>
-
-            <Link to={user ? "/dashboard" : "/auth"} className="p-2 hover:text-gold transition-colors">
-              <User size={20} />
-            </Link>
-            
-            <button className="md:hidden p-2 hover:text-gold transition-colors">
-              <Menu size={24} />
-            </button>
-          </div>
+    <div className="logo-container">
+      {(phase === 0 || phase === 1 || phase === 3) && (
+        <span className={`logo-ar absolute text-2xl tracking-wide font-bold text-[#2C2C2C] ${phase === 0 ? 'stay-visible' : phase === 1 ? 'drop-out' : 'rise-in'}`}>
+          نسيج
+        </span>
+      )}
+      {(phase === 1 || phase === 2 || phase === 3) && (
+        <div dir="ltr" className="absolute flex">
+          {wordEn.map((char, i) => {
+            const animClass = phase === 1 ? 'drop-in' : phase === 2 ? 'stay-visible' : 'rise-out';
+            return (
+              <span key={i} className={`letter text-2xl tracking-widest font-bold text-[#2C2C2C] ${animClass}`} style={{ animationDelay: `${i * 0.08}s` }}>
+                {char}
+              </span>
+            )
+          })}
         </div>
-      </div>
-    </header>
+      )}
+    </div>
+  );
+};
+
+export const Header = () => {
+  const { language, setLanguage } = useStore();
+
+  const navText = {
+    ar: { collections: 'المجموعات', philosophy: 'الفلسفة', contact: 'تواصل معنا' },
+    en: { collections: 'Collections', philosophy: 'Philosophy', contact: 'Contact Us' }
+  };
+  const t = navText[language as keyof typeof navText];
+
+  return (
+    <div className="sticky top-6 z-50 w-full px-4 sm:px-6 lg:px-8 pointer-events-none">
+      <header className="pointer-events-auto mx-auto max-w-7xl bg-white/75 backdrop-blur-md border border-white/50 rounded-2xl shadow-sm px-6 py-4 flex justify-between items-center transition-all duration-300">
+        
+        {/* النصف الأيمن: صورة الشعار + الاسم المتحرك */}
+        <Link to="/" className="flex items-center gap-3 transition-transform duration-300 hover:scale-105">
+          {/* صورة الشعار */}
+          <img 
+            src={logoImg} 
+            alt="Naseej Symbol" 
+            className="h-10 w-auto object-contain rounded-full drop-shadow-sm flex-shrink-0" 
+          />
+          {/* الاسم المتحرك */}
+          <DynamicLogoText />
+        </Link>
+
+        <nav className="hidden md:flex items-center gap-8 font-bold text-gray-600">
+          <Link to="/shop" className="hover:text-[#C5A059] transition-colors">{t.collections}</Link>
+          <Link to="#" className="hover:text-[#C5A059] transition-colors">{t.philosophy}</Link>
+          <Link to="#" className="hover:text-[#C5A059] transition-colors">{t.contact}</Link>
+        </nav>
+
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
+            className="p-2 text-gray-600 hover:text-black hover:bg-black/5 rounded-full transition-all"
+          >
+            <Globe size={20} />
+          </button>
+          
+          <Link to="/auth" className="p-2 text-gray-600 hover:text-black hover:bg-black/5 rounded-full transition-all">
+            <User size={20} />
+          </Link>
+          
+          <Link to="/checkout" className="p-2 text-gray-600 hover:text-black hover:bg-black/5 rounded-full transition-all relative">
+            <ShoppingBag size={20} />
+            <span className="absolute top-0 right-0 w-4 h-4 bg-[#C5A059] text-white text-[10px] flex items-center justify-center rounded-full">0</span>
+          </Link>
+        </div>
+      </header>
+    </div>
   );
 };

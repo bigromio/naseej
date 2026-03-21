@@ -125,3 +125,35 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.3);
   color: #2C2C2C !important;
 }
+
+/* --- حركات اللوجو الديناميكي --- */
+.logo-container {
+  display: flex; align-items: center; justify-content: center;
+  height: 40px; min-width: 120px; overflow: hidden; position: relative;
+}
+.letter, .logo-ar {
+  display: inline-block;
+  animation-fill-mode: forwards;
+  animation-duration: 0.6s;
+  animation-timing-function: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+@keyframes dropOut { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(40px); opacity: 0; } }
+@keyframes dropIn { 0% { transform: translateY(-40px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+@keyframes riseOut { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(-40px); opacity: 0; } }
+@keyframes riseIn { 0% { transform: translateY(40px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+
+.drop-out { animation-name: dropOut; }
+.drop-in { animation-name: dropIn; }
+.rise-out { animation-name: riseOut; }
+.rise-in { animation-name: riseIn; }
+.stay-visible { opacity: 1; transform: translateY(0); }
+
+/* --- تصميم الفوتر الزجاجي --- */
+.footer-glass {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+  position: relative;
+  z-index: 10;
+}
