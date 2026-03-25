@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useStore } from '@/store/useStore';
+import { useNavigate } from 'react-router-dom';
 import { Mail, Phone, User, ArrowRight, ArrowLeft, ShieldCheck, Loader2 } from 'lucide-react';
 
 export const Auth = () => {
-  const { language } = useStore();
+  const { language, setUser } = useStore();
   
   // حالات الصفحة
   const [isLogin, setIsLogin] = useState(true); // true = تسجيل دخول, false = حساب جديد
@@ -83,18 +84,29 @@ export const Auth = () => {
     }, 1500);
   };
 
+  const navigate = useNavigate(); // تعريف أداة التوجيه داخل المكون
+
   const handleVerifyOTP = (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    // TODO: سيتم ربط هذا مع Supabase للتحقق وإنشاء جلسة المستخدم
-    const SUPABASE_VERIFY_URL = 'http://192.168.1.100:3001/api/auth/verify';
-    console.log(`[Mock API] Verifying OTP: ${formData.otp} at ${SUPABASE_VERIFY_URL}`);
-
+    // محاكاة الاتصال بالسيرفر
     setTimeout(() => {
       setIsLoading(false);
-      alert(language === 'ar' ? 'تم الدخول بنجاح! سيتم توجيهك...' : 'Logged in successfully! Redirecting...');
-      // سيتم إضافة التوجيه لاحقاً: navigate('/dashboard');
+      
+      // --- الباب الخلفي للمطور (Developer Bypass) ---
+      // نقوم بإجبار النظام على تسجيل الدخول كمالك بصلاحيات كاملة
+      setUser({
+        id: 'dev-owner-id-12345',
+        full_name: 'فارس العسيري (المالك)',
+        phone: formData.phone || '0500000000',
+        email: formData.email || 'admin@naseej.com',
+        role: 'owner' // هذه الكلمة هي مفتاح الدخول للوحة التحكم
+      });
+
+      // توجيه المستخدم فوراً إلى لوحة التحكم
+      navigate('/admin');
+      
     }, 1500);
   };
 

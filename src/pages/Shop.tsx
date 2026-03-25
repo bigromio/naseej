@@ -1,88 +1,105 @@
-import React, { useState } from 'react';
-import { motion } from 'motion/react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
 import { useStore } from '@/store/useStore';
-import { translations } from '@/i18n/translations';
-
-const MOCK_PRODUCTS = [
-  { id: '1', name: 'Royal Velvet Sofa', price: 4500, category: 'livingRoom', image: 'https://picsum.photos/seed/sofa1/600/600' },
-  { id: '2', name: 'Oak Dining Table', price: 3200, category: 'diningRoom', image: 'https://picsum.photos/seed/table1/600/600' },
-  { id: '3', name: 'Minimalist Bed Frame', price: 2800, category: 'bedroom', image: 'https://picsum.photos/seed/bed1/600/600' },
-  { id: '4', name: 'Executive Office Chair', price: 1500, category: 'office', image: 'https://picsum.photos/seed/chair1/600/600' },
-  { id: '5', name: 'Lounge Armchair', price: 1800, category: 'livingRoom', image: 'https://picsum.photos/seed/armchair1/600/600' },
-  { id: '6', name: 'Marble Coffee Table', price: 1200, category: 'livingRoom', image: 'https://picsum.photos/seed/coffeetable1/600/600' },
-];
+import { Loader2, Filter } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 export const Shop = () => {
-  const { language } = useStore();
-  const t = translations[language];
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const { language, products, isLoadingProducts, productsError, fetchProducts } = useStore();
+  const isRTL = language === 'ar';
 
-  const filteredProducts = selectedCategory 
-    ? MOCK_PRODUCTS.filter(p => p.category === selectedCategory)
-    : MOCK_PRODUCTS;
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  const categories = ['All', ...new Set(products.map(p => isRTL ? p.category_ar : p.category_en).filter(Boolean))];
+  const filteredProducts = selectedCategory === 'All' ? products : products.filter(p => (isRTL ? p.category_ar : p.category_en) === selectedCategory);
+
+// 1. نسمي القاموس text
+  const text = {
+    ar: { title: 'المجموعات الحصرية', desc: 'تصفح أحدث إصدارات نسيج من الأثاث الفاخر.', all: 'الكل', filter: 'تصفية المنتجات', noProducts: 'لا توجد منتجات مطابقة.' },
+    en: { title: 'Exclusive Collections', desc: 'Browse Naseej\'s latest luxury furniture editions.', all: 'All', filter: 'Filter Products', noProducts: 'No matching products.' }
+  };
+  
+  // 2. نخبر النظام باختيار اللغة الحالية
+  const t = text[language as keyof typeof text];
 
   return (
-    <div className="min-h-screen pt-24 pb-12 bg-offwhite">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col md:flex-row gap-8">
-          {/* Sidebar Filters */}
-          <aside className="w-full md:w-64 shrink-0">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 sticky top-28">
-              <h3 className="font-serif text-xl font-bold mb-4">{t.categories}</h3>
-              <ul className="space-y-3">
-                {['livingRoom', 'bedroom', 'diningRoom', 'office'].map((cat) => (
-                  <li key={cat}>
-                    <button 
-                      onClick={() => setSelectedCategory(cat === selectedCategory ? null : cat)}
-                      className={`text-sm transition-colors ${selectedCategory === cat ? 'text-gold font-bold' : 'text-gray-600 hover:text-charcoal'}`}
-                    >
-                      {t[cat as keyof typeof t]}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+    <div className="pt-32 pb-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto min-h-screen">
+      <div className="text-center mb-12">
+        <h1 className="text-4xl font-bold text-[#2C2C2C] mb-4">{t.title}</h1>
+        <p className="text-gray-500 max-w-2xl mx-auto">{t.desc}</p>
+      </div>
 
-              <h3 className="font-serif text-xl font-bold mt-8 mb-4">{t.priceRange}</h3>
-              <input type="range" className="w-full accent-gold" />
-              
-              <button 
-                onClick={() => setSelectedCategory(null)}
-                className="mt-8 w-full py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                {t.clearFilters}
-              </button>
-            </div>
-          </aside>
+      <div className="flex flex-col lg:flex-row gap-8">
+        <button onClick={() => setIsMobileFilterOpen(!isMobileFilterOpen)} className="lg:hidden flex items-center gap-2 font-bold text-[#2C2C2C] bg-gray-100 p-3 rounded-lg w-fit">
+          <Filter size={20} /> {t.filter}
+        </button>
 
-          {/* Product Grid */}
-          <div className="flex-1">
+        <aside className={`${isMobileFilterOpen ? 'block' : 'hidden'} lg:block w-full lg:w-64 flex-shrink-0`}>
+          <div className="sticky top-32 bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
+            <h3 className="font-bold text-lg mb-6 border-b pb-4">{isRTL ? 'الأقسام الرئيسية' : 'Categories'}</h3>
+            <ul className="space-y-3">
+              {categories.map((cat, idx) => (
+                <li key={idx}>
+                  <button onClick={() => setSelectedCategory(cat as string)} className={`text-sm w-full text-${isRTL ? 'right' : 'left'} transition-colors ${selectedCategory === cat ? 'text-[#C5A059] font-bold' : 'text-gray-500 hover:text-black'}`}>
+                    {cat === 'All' ? t.all : (cat as string)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </aside>
+
+        <main className="flex-1">
+          {isLoadingProducts ? (
+            <div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#C5A059]" size={48} /></div>
+          ) : productsError ? (
+            <div className="text-center text-red-500 py-10">{productsError}</div>
+          ) : filteredProducts.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredProducts.map((product, index) => (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  key={product.id}
-                  className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 group"
-                >
-                  <Link to={`/product/${product.id}`} className="block relative overflow-hidden aspect-square">
-                    <img 
-                      src={product.image} 
-                      alt={product.name} 
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                      referrerPolicy="no-referrer"
-                    />
-                  </Link>
-                  <div className="p-5">
-                    <h3 className="font-medium text-lg mb-2">{product.name}</h3>
-                    <p className="text-gold font-bold">{product.price} {t.currency}</p>
+              {filteredProducts.map((product) => (
+                <Link to={`/product/${product.id}`} key={product.id} className="group flex flex-col cursor-pointer bg-white rounded-2xl p-3 border border-transparent hover:border-gray-100 hover:shadow-lg transition-all duration-300 relative">
+                  
+                  {/* شارة الخصم (Sale Badge) */}
+                  {product.discount_price && (
+                    <div className={`absolute top-5 ${isRTL ? 'right-5' : 'left-5'} z-10 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md`}>
+                      {isRTL ? 'خصم ' : 'Save '} {Math.round(((product.base_price - product.discount_price) / product.base_price) * 100)}%
+                    </div>
+                  )}
+
+                  <div className="relative aspect-square bg-gray-50 rounded-xl overflow-hidden mb-4">
+                    <img src={product.image_lifestyle || 'https://images.unsplash.com/photo-1505691938895-1758d7feb511?q=80&w=800'} alt={isRTL ? product.title_ar : product.title_en} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                   </div>
-                </motion.div>
+                  
+                  <div className="flex flex-col flex-grow px-2">
+                    <span className="text-xs font-bold text-[#C5A059] mb-1">{isRTL ? product.sub_category_ar : product.sub_category_en}</span>
+                    <h3 className="text-lg font-bold text-[#2C2C2C] mb-2">{isRTL ? product.title_ar : product.title_en}</h3>
+                    <p className="text-sm text-gray-500 line-clamp-2 mb-4 flex-grow">{isRTL ? product.short_desc_ar : product.short_desc_en}</p>
+                    
+                    {/* تحديث منطقة السعر */}
+                    <div className="text-lg font-bold mt-auto flex items-center gap-2 flex-wrap">
+                      {product.discount_price ? (
+                        <>
+                          <span className="text-red-600">{product.discount_price.toLocaleString()} {isRTL ? 'ر.س' : 'SAR'}</span>
+                          <span className="text-sm text-gray-400 line-through font-normal">{product.base_price.toLocaleString()}</span>
+                        </>
+                      ) : (
+                        <span className="text-[#2C2C2C]">{product.base_price.toLocaleString()} {isRTL ? 'ر.س' : 'SAR'}</span>
+                      )}
+                      {product.is_dynamic_size && <span className="text-xs text-gray-400 font-normal mx-1">{isRTL ? '/ للمتر المربع' : '/ SQM'}</span>}
+                    </div>
+
+                  </div>
+                </Link>
               ))}
             </div>
-          </div>
-        </div>
+          ) : (
+            <div className="text-center text-gray-400 py-20">{t.noProducts}</div>
+          )}
+        </main>
       </div>
     </div>
   );

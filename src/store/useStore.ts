@@ -1,53 +1,89 @@
 import { create } from 'zustand';
+import { supabase } from '@/lib/supabase';
 
 export interface User {
   id: string;
-  name: string;
-  email: string;
-  role: 'customer' | 'admin' | 'workshop';
+  full_name: string;
+  email?: string;
+  phone: string;
+  role: 'customer' | 'owner' | 'manager' | 'employee';
 }
 
-export interface CartItem {
+export interface Product {
   id: string;
-  productId: string;
-  name: string;
-  price: number;
-  quantity: number;
-  width?: number;
-  length?: number;
-  image: string;
+  sku: string;
+  title_ar: string;
+  title_en: string;
+  category_ar: string;
+  category_en: string;
+  sub_category_ar: string;
+  sub_category_en: string;
+  short_desc_ar: string;
+  short_desc_en: string;
+  long_desc_ar: string;
+  long_desc_en: string;
+  base_price: number;
+  discount_price?: number | null; // السعر بعد الخصم
+  image_lifestyle: string;
+  gallery?: string[]; // معرض الصور
+  video_url?: string; // رابط الفيديو
+  is_dynamic_size: boolean;
+  collection_id?: string;
 }
 
-interface AppState {
+interface StoreState {
   language: 'ar' | 'en';
   setLanguage: (lang: 'ar' | 'en') => void;
+  
   user: User | null;
   setUser: (user: User | null) => void;
-  cart: CartItem[];
-  addToCart: (item: CartItem) => void;
-  removeFromCart: (id: string) => void;
-  updateQuantity: (id: string, quantity: number) => void;
-  clearCart: () => void;
+  
+  products: Product[];
+  isLoadingProducts: boolean;
+  productsError: string | null;
+  fetchProducts: () => Promise<void>;
+
+  // إعدادات الموقع (للبنرات والبوب-أب)
+  siteSettings: any;
+  fetchSiteSettings: () => Promise<void>;
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<StoreState>((set) => ({
   language: 'ar',
-  setLanguage: (lang) => {
-    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    document.documentElement.lang = lang;
-    set({ language: lang });
-  },
+  setLanguage: (lang) => set({ language: lang }),
+  
   user: null,
   setUser: (user) => set({ user }),
-  cart: [],
-  addToCart: (item) => set((state) => {
-    const existing = state.cart.find(i => i.id === item.id);
-    if (existing) {
-      return { cart: state.cart.map(i => i.id === item.id ? { ...i, quantity: i.quantity + item.quantity } : i) };
+  
+  products: [],
+  isLoadingProducts: false,
+  productsError: null,
+  
+  fetchProducts: async () => {
+    set({ isLoadingProducts: true, productsError: null });
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      set({ products: data as Product[], isLoadingProducts: false });
+    } catch (err: any) {
+      console.error('Error fetching products:', err.message);
+      set({ productsError: err.message, isLoadingProducts: false });
     }
-    return { cart: [...state.cart, item] };
-  }),
-  removeFromCart: (id) => set((state) => ({ cart: state.cart.filter(i => i.id !== id) })),
-  updateQuantity: (id, quantity) => set((state) => ({ cart: state.cart.map(i => i.id === id ? { ...i, quantity } : i) })),
-  clearCart: () => set({ cart: [] }),
+  },
+
+  siteSettings: {},
+  fetchSiteSettings: async () => {
+    try {
+      const { data, error } = await supabase.from('site_settings').select('*');
+      if (error) throw error;
+      if (data) {
+        const mapped = data.reduce((acc: any, curr: any) => ({ ...acc, [curr.id]: curr }), {});
+        set({ siteSettings: mapped });
+      }
+    } catch (err) { console.error('Error fetching site settings:', err); }
+  }
 }));
