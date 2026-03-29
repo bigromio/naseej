@@ -3,7 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from '@/store/useStore';
 import {
   Users, Package, Tag, Megaphone, ShoppingCart, BarChart3,
-  Settings, LogOut, Shield, Store, User as UserIcon, ChevronDown, Menu, X
+  Settings, LogOut, Shield, Store, User as UserIcon, ChevronDown, Menu, X, Paintbrush, FileText
 } from 'lucide-react';
 import logo from '@/assets/logo.png';
 
@@ -27,6 +27,7 @@ export const AdminLayout = () => {
       accountSettings: 'إعدادات الحساب', logout: 'تسجيل الخروج',
       nav: {
         team: 'الفريق والعملاء', products: 'إدارة المنتجات', offers: 'العروض والخصومات',
+        appearance: 'مظهر المتجر', // <-- أضف هذه
         orders: 'الطلبات واللوجستيات', campaigns: 'الحملات التسويقية', analytics: 'التحليلات والأداء'
       }
     },
@@ -35,6 +36,7 @@ export const AdminLayout = () => {
       accountSettings: 'Account Settings', logout: 'Logout',
       nav: {
         team: 'HR & CRM', products: 'Products Catalog', offers: 'Offers & Discounts',
+        appearance: 'Store Appearance', // <-- أضف هذه
         orders: 'Orders & Logistics', campaigns: 'Marketing Campaigns', analytics: 'Analytics & Perf.'
       }
     }
@@ -47,6 +49,8 @@ export const AdminLayout = () => {
     { path: '/admin', icon: Users, label: t.nav.team },
     { path: '/admin/products', icon: Package, label: t.nav.products },
     { path: '/admin/offers', icon: Tag, label: t.nav.offers },
+    { path: '/admin/appearance', icon: Paintbrush, label: t.nav.appearance }, // <-- التبويب الجديد
+    { path: '/admin/pages', icon: FileText, label: language === 'ar' ? 'إدارة الصفحات' : 'Pages Management' }, // <-- التبويب الجديد
     { path: '/admin/orders', icon: ShoppingCart, label: t.nav.orders },
     { path: '/admin/campaigns', icon: Megaphone, label: t.nav.campaigns },
     { path: '/admin/analytics', icon: BarChart3, label: t.nav.analytics },

@@ -19,11 +19,17 @@ import { ProductDetails } from '@/pages/ProductDetails';
 import { Checkout } from '@/pages/Checkout';
 import { CustomerDashboard } from '@/pages/CustomerDashboard';
 import { DeliveryVerify } from '@/pages/DeliveryVerify';
+import { DynamicPage } from '@/pages/DynamicPage';
+import { Contact } from '@/pages/Contact';
+import { CartDrawer } from '@/components/CartDrawer';
 
 // Pages - Admin
 import { AdminDashboard } from '@/pages/AdminDashboard';
 import { AdminProducts } from '@/pages/AdminProducts';
 import { AdminOffers } from '@/pages/AdminOffers';
+import { AdminAppearance } from '@/pages/AdminAppearance';
+import { AdminPages } from '@/pages/AdminPages';
+import { AdminOrders } from '@/pages/AdminOrders';
 
 // نظام الحماية المطور (يدعم الصلاحيات المتعددة: مالك، مدير، موظف، عميل)
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) => {
@@ -57,6 +63,8 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/shop" element={<Shop />} />
           <Route path="/product/:id" element={<ProductDetails />} />
+          <Route path="/page/:slug" element={<DynamicPage />} />  
+          <Route path="/contact" element={<Contact />} />       
           <Route path="/auth" element={<Auth />} />
           
           {/* Protected Customer Routes (أي مستخدم مسجل دخول يمكنه الدخول للتشيك أوت) */}
@@ -85,13 +93,11 @@ export default function App() {
           {/* المرحلة 2: المنتجات والعروض */}
           <Route path="products" element={<AdminProducts />} />
           <Route path="offers" element={<AdminOffers />} />
+          <Route path="appearance" element={<AdminAppearance />} />
+          <Route path="pages" element={<AdminPages />} />
           
           {/* المرحلة 3 و 4 و 5: مسارات مستقبلية مجهزة مسبقاً */}
-          <Route path="orders" element={
-            <div className="flex items-center justify-center h-[50vh] text-gray-400 text-xl font-bold">
-              Orders & Logistics (Coming Soon)
-            </div>
-          } />
+          <Route path="orders" element={<AdminOrders />} />
           <Route path="campaigns" element={
             <div className="flex items-center justify-center h-[50vh] text-gray-400 text-xl font-bold">
               Marketing Campaigns (Coming Soon)
@@ -103,6 +109,7 @@ export default function App() {
             </div>
           } />
         </Route>
+
 
         {/* Workshop Delivery Route (No Layout) */}
         <Route path="/delivery-verify" element={<DeliveryVerify />} />

@@ -1,6 +1,29 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
 
+
+export interface HomeSection {
+  id: string;
+  is_active: boolean;
+  sort_order: number;
+  style_type: string;
+  content_ar: any;
+  content_en: any;
+}
+
+export interface Page {
+  id: string;
+  slug: string;
+  title_ar: string;
+  title_en: string;
+  content_ar: string;
+  content_en: string;
+  show_in_navbar: boolean;
+  show_in_footer: boolean;
+  is_active: boolean;
+  sort_order: number;
+}
+
 export interface User {
   id: string;
   full_name: string;
@@ -46,7 +69,15 @@ interface StoreState {
   // إعدادات الموقع (للبنرات والبوب-أب)
   siteSettings: any;
   fetchSiteSettings: () => Promise<void>;
+
+  
+  homeSections: HomeSection[];
+  fetchHomeSections: () => Promise<void>;
+
+  pages: Page[];
+  fetchPages: () => Promise<void>;
 }
+
 
 export const useStore = create<StoreState>((set) => ({
   language: 'ar',
@@ -85,5 +116,30 @@ export const useStore = create<StoreState>((set) => ({
         set({ siteSettings: mapped });
       }
     } catch (err) { console.error('Error fetching site settings:', err); }
+  },
+
+  homeSections: [],
+  fetchHomeSections: async () => {
+    try {
+      const { data, error } = await supabase
+        .from('home_sections')
+        .select('*')
+        .order('sort_order', { ascending: true });
+      if (error) throw error;
+      set({ homeSections: data as HomeSection[] });
+    } catch (err) { console.error('Error fetching home sections:', err); }
+  },
+
+  pages: [],
+  fetchPages: async () => {
+    try {
+      const { data, error } = await supabase
+        .from('pages')
+        .select('*')
+        .order('sort_order', { ascending: true });
+      if (error) throw error;
+      set({ pages: data as Page[] });
+    } catch (err) { console.error('Error fetching pages:', err); }
   }
 }));
+
