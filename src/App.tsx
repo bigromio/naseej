@@ -57,6 +57,7 @@ export default function App() {
 
   return (
     <Router>
+      <CartDrawer /> {/* <--- تم وضع السلة العائمة هنا */}
       <Routes>
         {/* Public Routes with Main Layout */}
         <Route element={<MainLayout />}>
@@ -67,12 +68,7 @@ export default function App() {
           <Route path="/contact" element={<Contact />} />       
           <Route path="/auth" element={<Auth />} />
           
-          {/* Protected Customer Routes (أي مستخدم مسجل دخول يمكنه الدخول للتشيك أوت) */}
-          <Route path="/checkout" element={
-            <ProtectedRoute>
-              <Checkout />
-            </ProtectedRoute>
-          } />
+          <Route path="/checkout" element={<Checkout />} />
           
           <Route path="/dashboard" element={
             <ProtectedRoute allowedRoles={['customer']}>

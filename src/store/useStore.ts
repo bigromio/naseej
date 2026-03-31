@@ -48,10 +48,15 @@ export interface Product {
   base_price: number;
   discount_price?: number | null; // السعر بعد الخصم
   image_lifestyle: string;
+  image_white_bg?: string;
   gallery?: string[]; // معرض الصور
   video_url?: string; // رابط الفيديو
   is_dynamic_size: boolean;
   collection_id?: string;
+}
+
+export interface CartItem extends Product {
+  quantity: number;
 }
 
 interface StoreState {
@@ -66,6 +71,15 @@ interface StoreState {
   productsError: string | null;
   fetchProducts: () => Promise<void>;
 
+  // نظام السلة العائمة
+  cart: CartItem[];
+  isCartOpen: boolean;
+  openCart: () => void;
+  closeCart: () => void;
+  addToCart: (product: Product, quantity?: number) => void;
+  removeFromCart: (productId: string) => void;
+  updateQuantity: (productId: string, quantity: number) => void;
+  clearCart: () => void;
   // إعدادات الموقع (للبنرات والبوب-أب)
   siteSettings: any;
   fetchSiteSettings: () => Promise<void>;
@@ -90,6 +104,7 @@ export const useStore = create<StoreState>((set) => ({
   isLoadingProducts: false,
   productsError: null,
   
+
   fetchProducts: async () => {
     set({ isLoadingProducts: true, productsError: null });
     try {
@@ -106,6 +121,33 @@ export const useStore = create<StoreState>((set) => ({
     }
   },
 
+  // تنفيذ نظام السلة العائمة
+  cart: [],
+  isCartOpen: false,
+  openCart: () => set({ isCartOpen: true }),
+  closeCart: () => set({ isCartOpen: false }),
+  
+  addToCart: (product, quantity = 1) => set((state) => {
+    const existing = state.cart.find(item => item.id === product.id);
+    if (existing) {
+      // إذا كان المنتج موجوداً، نزيد الكمية ونفتح السلة تلقائياً
+      return { 
+        cart: state.cart.map(item => item.id === product.id ? { ...item, quantity: item.quantity + quantity } : item),
+        isCartOpen: true 
+      };
+    }
+    // إذا كان منتجاً جديداً
+    return { cart: [...state.cart, { ...product, quantity }], isCartOpen: true };
+  }),
+  
+  removeFromCart: (productId) => set((state) => ({
+    cart: state.cart.filter(item => item.id !== productId)
+  })),
+  
+  updateQuantity: (id, quantity) => set((state) => ({
+    cart: state.cart.map(item => item.id === id ? { ...item, quantity: Math.max(1, quantity) } : item)
+  })),
+  clearCart: () => set({ cart: [] }),
   siteSettings: {},
   fetchSiteSettings: async () => {
     try {

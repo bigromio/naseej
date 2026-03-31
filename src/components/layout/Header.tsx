@@ -42,7 +42,7 @@ const DynamicLogoText = () => {
 };
 
 export const Header = () => {
-  const { language, setLanguage, pages, fetchPages, user } = useStore();
+  const { language, setLanguage, pages, fetchPages, user, cart, openCart } = useStore();
   const isRTL = language === 'ar';
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -97,10 +97,14 @@ export const Header = () => {
             <User size={20} />
           </Link>
           
-          <Link to="/checkout" className="p-2 text-gray-600 hover:text-black hover:bg-black/5 rounded-full transition-all relative">
+          <button onClick={openCart} className="p-2 text-gray-600 hover:text-black hover:bg-black/5 rounded-full transition-all relative cursor-pointer">
             <ShoppingBag size={20} />
-            <span className="absolute top-0 right-0 w-4 h-4 bg-[#C5A059] text-white text-[10px] flex items-center justify-center rounded-full">0</span>
-          </Link>
+            {cart.length > 0 && (
+              <span className="absolute top-0 right-0 w-4 h-4 bg-[#C5A059] text-white text-[10px] flex items-center justify-center rounded-full">
+                {cart.length}
+              </span>
+            )}
+          </button>
 
           <button className="md:hidden p-2 text-gray-600 hover:text-black hover:bg-black/5 rounded-full" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
             {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
