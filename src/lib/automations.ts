@@ -1,0 +1,94 @@
+import { supabase } from './supabase';
+
+const NOTIFICATION_API = 'http://167.86.73.97:8080/send';
+
+// قائمة الإجراءات (الأحداث) المعرفة في النظام
+export const SYSTEM_EVENTS = {
+  order_confirmed: 'تأكيد الطلب الجديد',
+  order_shipped: 'تم شحن الطلب',
+  appointment_booked: 'تأكيد حجز موعد',
+  appointment_reminder: 'تذكير بموعد قريب',
+  welcome_msg: 'رسالة ترحيب بالتسجيل',
+  custom: 'إجراء مخصص (Custom)'
+};
+
+interface TriggerProps {
+  eventName: keyof typeof SYSTEM_EVENTS | string;
+  brand?: string;
+  userParams: {
+    phone?: string | null;
+    email?: string | null;
+    language?: 'ar' | 'en';
+  };
+  variables: Record<string, string>;
+}
+
+export const triggerAutomation = async ({ eventName, brand = 'naseej', userParams, variables }: TriggerProps) => {
+  const isRTL = userParams.language !== 'en';
+
+  try {
+    // 🌟 جلب إعدادات البراند (للحصول على قالب الـ HTML العام للإيميل) 🌟
+    const { data: settings } = await supabase.from('integration_settings').select('email_layout').eq('project_name', brand).maybeSingle();
+    const emailLayout = settings?.email_layout || '<div dir="{{dir}}" style="padding: 20px; font-family: Tahoma;">{{message}}</div>';
+
+    // 1. جلب *جميع* القوالب المفعلة لهذا الإجراء
+    const { data: templates, error } = await supabase
+      .from('notification_templates')
+      .select('content_ar, content_en, channel, subject')
+      .eq('project_name', brand)
+      .eq('event_name', eventName)
+      .eq('is_active', true);
+
+    if (error || !templates || templates.length === 0) return { success: false, reason: 'No active templates' };
+
+    const formatPhone = (p: string) => {
+      let clean = p.replace(/\D/g, '');
+      return clean.startsWith('05') ? '966' + clean.substring(1) : clean;
+    };
+
+    // 2. الدوران على كل القوالب
+    const sendPromises = templates.map(async (template) => {
+      let finalMessage = isRTL ? template.content_ar : template.content_en;
+      if (!finalMessage) return;
+
+      // استبدال المتغيرات
+      Object.entries(variables).forEach(([key, value]) => {
+        const regex = new RegExp(`{{${key}}}`, 'g');
+        finalMessage = finalMessage.replace(regex, value);
+      });
+
+      const payload: any = { brand };
+
+      if (template.channel === 'whatsapp' && userParams.phone) {
+        payload.phone = formatPhone(userParams.phone);
+        payload.message = finalMessage;
+      } 
+      else if (template.channel === 'email' && userParams.email) {
+        payload.email = userParams.email;
+        payload.subject = template.subject || (isRTL ? 'إشعار جديد' : 'New Notification');
+        // 🌟 حقن الرسالة داخل قالب الـ HTML الذي جلبناه من لوحة التحكم 🌟
+        payload.html = emailLayout
+          .replace('{{dir}}', isRTL ? 'rtl' : 'ltr')
+          .replace('{{message}}', finalMessage.replace(/\n/g, '<br>'));
+      } else {
+        return; // تجاوز إذا كانت وسيلة التواصل غير متوفرة لهذه القناة
+      }
+
+      // إرسال الطلب للسيرفر
+      return fetch(NOTIFICATION_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(err => console.error(`Failed to send ${template.channel}:`, err));
+    });
+
+    // تنفيذ جميع الإرسالات في نفس اللحظة
+    await Promise.all(sendPromises);
+
+    return { success: true };
+
+  } catch (err) {
+    console.error(`Automation Error [${eventName}]:`, err);
+    return { success: false, error: err };
+  }
+};

@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
-import { supabase } from '@/lib/supabase'; // <-- استدعاء قاعدة البيانات
-import { MapPin, Phone, Mail, Instagram, Clock, Calendar, MessageSquare, Send, CalendarCheck, Twitter, Facebook, Youtube, Linkedin, MessageCircle, Link as LinkIcon, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { triggerAutomation } from '@/lib/automations'; // 👈 استدعاء محرك الإشعارات
+import { MapPin, Phone, Mail, Instagram, Clock, Calendar, MessageSquare, Send, CalendarCheck, Twitter, Facebook, Youtube, Linkedin, MessageCircle, Link as LinkIcon, Loader2, KeyRound, CheckCircle, User as UserIcon } from 'lucide-react';
+
+const NOTIFICATION_API = 'http://167.86.73.97:8080/send';
 
 export const Contact = () => {
-  const { language, homeSections, fetchHomeSections, user } = useStore();
+  const { language, homeSections, fetchHomeSections, user, setUser } = useStore();
   const isRTL = language === 'ar';
   
   const [activeTab, setActiveTab] = useState<'message' | 'book'>('book');
@@ -34,11 +37,139 @@ export const Contact = () => {
   };
 
   // ==========================================
-  // 🌟 نظام الحجوزات الذكي (Booking Logic)
+  // 🌟 نظام المصادقة الموحد (مثل الـ Checkout)
+  // ==========================================
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authStep, setAuthStep] = useState<'details' | 'otp'>('details');
+  const [resendTimer, setResendTimer] = useState(0);
+
+  const [loginVal, setLoginVal] = useState('');
+  const [regFullName, setRegFullName] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [activeContactForOTP, setActiveContactForOTP] = useState('');
+
+  const [otp, setOtp] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+
+  useEffect(() => {
+    let interval: any;
+    if (resendTimer > 0) interval = setInterval(() => setResendTimer((prev) => prev - 1), 1000);
+    return () => clearInterval(interval);
+  }, [resendTimer]);
+
+  const formatPhoneForWhatsApp = (phone: string) => {
+    let cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.startsWith('05')) cleanPhone = '966' + cleanPhone.substring(1);
+    return cleanPhone;
+  };
+
+  // 1️⃣ إرسال رمز التحقق (للدخول أو التسجيل)
+  const handleSendOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (resendTimer > 0) return;
+
+    let targetPhone = '';
+    let targetEmail = '';
+    let dbContactKey = '';
+
+    if (authMode === 'login') {
+      if (!loginVal) return alert(isRTL ? 'يرجى إدخال الجوال أو الإيميل' : 'Enter phone or email');
+      if (loginVal.includes('@')) { targetEmail = loginVal; dbContactKey = loginVal; } 
+      else { targetPhone = loginVal; dbContactKey = loginVal; }
+    } else {
+      if (!regFullName || !regPhone || !regEmail) return alert(isRTL ? 'يرجى تعبئة جميع الحقول' : 'Please fill all fields');
+      targetPhone = regPhone; targetEmail = regEmail; dbContactKey = regPhone;
+    }
+
+    setIsAuthenticating(true);
+    const newOtp = Math.floor(1000 + Math.random() * 9000).toString();
+
+    try {
+      const { error: dbError } = await supabase.from('otp_verifications').upsert({
+        contact_val: dbContactKey, code: newOtp, expires_at: new Date(Date.now() + 10 * 60000).toISOString()
+      }, { onConflict: 'contact_val' });
+      if (dbError) throw dbError;
+
+      const payload: any = { brand: 'naseej' };
+      if (targetPhone) {
+        payload.phone = formatPhoneForWhatsApp(targetPhone);
+        payload.message = isRTL ? `مرحباً بك في نسيج 🛋️\n\nرمز التحقق الخاص بك هو: *${newOtp}*\n\nلا تشارك هذا الرمز مع أحد.` : `Welcome to Naseej 🛋️\n\nYour OTP is: *${newOtp}*`;
+      }
+      if (targetEmail) {
+        payload.email = targetEmail;
+        payload.subject = isRTL ? 'رمز التحقق - نسيج' : 'OTP - Naseej';
+        payload.html = `<div style="text-align:center; padding:20px; font-family:Tahoma;"><h2>${isRTL ? 'رمز التحقق الخاص بك:' : 'Your OTP code:'}</h2><h1 style="color:#C5A059; letter-spacing:5px;">${newOtp}</h1></div>`;
+      }
+
+      const response = await fetch(NOTIFICATION_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!response.ok) throw new Error('Failed');
+      
+      setActiveContactForOTP(dbContactKey);
+      setResendTimer(60); 
+      setAuthStep('otp');
+    } catch (error) {
+      alert(isRTL ? 'حدث خطأ في إرسال الرمز.' : 'Error sending OTP.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  // 2️⃣ التحقق من الرمز وإنشاء الحساب التلقائي + رسالة الترحيب
+  const handleVerifyOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otp) return;
+    setIsAuthenticating(true);
+    
+    try {
+      const { data: otpData, error: otpError } = await supabase.from('otp_verifications').select('*').eq('contact_val', activeContactForOTP).eq('code', otp).single();
+      if (otpError || !otpData) return alert(isRTL ? 'رمز التحقق غير صحيح!' : 'Invalid OTP code!');
+      if (new Date() > new Date(otpData.expires_at)) return alert(isRTL ? 'انتهت صلاحية الرمز، يرجى طلب رمز جديد.' : 'OTP expired, please request a new one.');
+
+      await supabase.from('otp_verifications').delete().eq('contact_val', activeContactForOTP);
+
+      let finalUser = null;
+      
+      if (authMode === 'login') {
+        const searchColumn = activeContactForOTP.includes('@') ? 'email' : 'phone';
+        const { data: existingUser } = await supabase.from('users').select('*').eq(searchColumn, activeContactForOTP).single();
+        if (existingUser) { finalUser = existingUser; } 
+        else {
+          const newUser = { full_name: isRTL ? 'عميل نسيج' : 'Naseej Customer', [searchColumn]: activeContactForOTP, role: 'customer' };
+          const { data: insertedUser, error } = await supabase.from('users').insert([newUser]).select().single();
+          if (error) throw error;
+          finalUser = insertedUser;
+          
+          // 🌟 إطلاق إشعار الترحيب للعملاء الجدد 🌟
+          await triggerAutomation({ eventName: 'welcome_msg', brand: 'naseej', userParams: { phone: finalUser.phone, email: finalUser.email, language: isRTL ? 'ar' : 'en' }, variables: { customer_name: finalUser.full_name } });
+        }
+      } else {
+        const { data: existingUserCheck } = await supabase.from('users').select('*').eq('phone', regPhone).maybeSingle();
+        if (existingUserCheck) { finalUser = existingUserCheck; } 
+        else {
+          const newUser = { full_name: regFullName, phone: regPhone, email: regEmail, role: 'customer' };
+          const { data: insertedUser, error } = await supabase.from('users').insert([newUser]).select().single();
+          if (error) throw error;
+          finalUser = insertedUser;
+
+          // 🌟 إطلاق إشعار الترحيب للعملاء الجدد 🌟
+          await triggerAutomation({ eventName: 'welcome_msg', brand: 'naseej', userParams: { phone: finalUser.phone, email: finalUser.email, language: isRTL ? 'ar' : 'en' }, variables: { customer_name: finalUser.full_name } });
+        }
+      }
+
+      setUser(finalUser);
+    } catch (error) {
+      console.error(error);
+      alert(isRTL ? 'حدث خطأ أثناء مزامنة بياناتك.' : 'Error syncing user data.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  // ==========================================
+  // 🌟 نظام المواعيد الفعلي للمستخدمين المسجلين
   // ==========================================
   const [bookingData, setBookingData] = useState({
-    name: (user as any)?.user_metadata?.full_name || (user as any)?.name || '',
-    phone: '',
     service: isRTL ? 'استشارة تصميم داخلي' : 'Interior Design Consultation',
     date: '',
     time: ''
@@ -46,81 +177,60 @@ export const Contact = () => {
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [isBooking, setIsBooking] = useState(false);
 
-  // توليد الأوقات المتاحة عند تغيير التاريخ
   useEffect(() => {
-    if (!bookingData.date) {
-      setAvailableSlots([]);
-      return;
-    }
-
+    if (!bookingData.date) { setAvailableSlots([]); return; }
     const fetchBookedSlots = async () => {
       try {
-        // جلب المواعيد المحجوزة مسبقاً في هذا اليوم (ولا تشمل الملغاة)
-        const { data, error } = await supabase
-          .from('appointments')
-          .select('appointment_time')
-          .eq('appointment_date', bookingData.date)
-          .neq('status', 'cancelled');
-        
+        const { data, error } = await supabase.from('appointments').select('appointment_time').eq('appointment_date', bookingData.date).neq('status', 'cancelled');
         if (error) throw error;
 
-        // الأوقات الافتراضية للعمل (من 10 صباحاً إلى 9 مساءً - بنظام 24 ساعة)
         const allSlots = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
-        
-        // استخراج الأوقات المحجوزة
-        const booked = data.map(app => app.appointment_time.substring(0, 5)); // تقليم الثواني إن وجدت
-        
-        // تصفية الأوقات وإبقاء المتاحة فقط
+        const booked = data.map(app => app.appointment_time.substring(0, 5));
         const free = allSlots.filter(slot => !booked.includes(slot));
         setAvailableSlots(free);
         
-        // تفريغ الوقت المختار إذا لم يعد متاحاً
-        if (bookingData.time && !free.includes(bookingData.time)) {
-          setBookingData(prev => ({ ...prev, time: '' }));
-        }
-
-      } catch (error) {
-        console.error("Error fetching slots:", error);
-      }
+        if (bookingData.time && !free.includes(bookingData.time)) setBookingData(prev => ({ ...prev, time: '' }));
+      } catch (error) { console.error("Error fetching slots:", error); }
     };
-
     fetchBookedSlots();
-  }, [bookingData.date]);
+  }, [bookingData.date, bookingData.time]);
 
-  const handleBookSubmit = async (e: React.FormEvent) => {
+  const executeBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bookingData.name || !bookingData.phone || !bookingData.date || !bookingData.time) {
-      alert(isRTL ? 'يرجى تعبئة جميع الحقول المطلوبة واختيار وقت متاح.' : 'Please fill all fields and select a valid time.');
-      return;
-    }
-
+    if (!user || !bookingData.date || !bookingData.time) return alert(isRTL ? 'يرجى تعبئة جميع الحقول' : 'Fill all fields');
     setIsBooking(true);
+    
     try {
+      // 1. حفظ الموعد في القاعدة
       const { error } = await supabase.from('appointments').insert([{
-        user_id: user?.id || null, // إذا كان مسجلاً دخول
-        customer_name: bookingData.name,
-        customer_phone: bookingData.phone,
+        user_id: user.id,
+        customer_name: user.full_name,
+        customer_phone: user.phone,
         service_type: bookingData.service,
         appointment_date: bookingData.date,
-        appointment_time: bookingData.time + ':00', // صيغة الوقت في SQL
-        status: 'pending' // يظهر كـ "قيد المراجعة" في اللوحة
+        appointment_time: bookingData.time + ':00',
+        status: 'pending'
       }]);
-
       if (error) throw error;
 
-      alert(isRTL ? '🎉 تم تسجيل طلب الحجز بنجاح! سنتواصل معك قريباً لتأكيد الموعد.' : '🎉 Booking request submitted successfully! We will contact you soon to confirm.');
-      
-      // إعادة تعيين النموذج
-      setBookingData(prev => ({ ...prev, date: '', time: '', phone: '' }));
-      
-    } catch (error: any) {
-      alert(error.message);
-    } finally {
-      setIsBooking(false);
-    }
-  };
+      // 2. إطلاق إشعار حجز الموعد 🌟
+      const formattedTime = parseInt(bookingData.time) > 12 ? `${parseInt(bookingData.time) - 12}:00 PM` : parseInt(bookingData.time) === 12 ? '12:00 PM' : `${bookingData.time} AM`;
+      await triggerAutomation({
+        eventName: 'appointment_booked', 
+        brand: 'naseej',
+        userParams: { phone: user.phone, email: user.email, language: isRTL ? 'ar' : 'en' },
+        variables: {
+          customer_name: user.full_name,
+          appointment_date: `${bookingData.date} | ${formattedTime}`,
+          service_type: bookingData.service
+        }
+      });
 
-  // ==========================================
+      alert(isRTL ? '🎉 تم تأكيد الموعد بنجاح!' : '🎉 Appointment Confirmed!');
+      setBookingData({ ...bookingData, date: '', time: '' });
+      
+    } catch (err: any) { alert(err.message); } finally { setIsBooking(false); }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50/50 pb-20">
@@ -168,58 +278,100 @@ export const Contact = () => {
               </div>
 
               <div className="p-8 md:p-10">
-                {/* 🌟 نموذج الحجز المبرمج */}
+                {/* 🌟 تبويب الحجز 🌟 */}
                 {activeTab === 'book' && (
-                  <form className="space-y-6 animate-in fade-in" onSubmit={handleBookSubmit}>
-                    <div className="text-center mb-8">
-                      <h3 className="text-2xl font-bold text-[#2C2C2C] mb-2">{isRTL ? 'احجز موعدك الآن' : 'Book Your Session'}</h3>
-                      <p className="text-gray-500">{isRTL ? 'اختر الوقت المناسب لزيارتنا أو للتحدث مع خبراء التصميم.' : 'Choose the best time to visit or speak with our design experts.'}</p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الاسم الكريم' : 'Full Name'}</label>
-                        <input type="text" value={bookingData.name} onChange={e => setBookingData({...bookingData, name: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50" required />
+                  !user ? (
+                    // 1. شاشة الدخول / التسجيل لغير المسجلين
+                    <div className="animate-in fade-in">
+                      <div className="text-center mb-8">
+                        <UserIcon className="mx-auto text-[#C5A059] mb-4" size={40}/>
+                        <h3 className="text-2xl font-bold text-[#2C2C2C]">{isRTL ? 'تسجيل الدخول لحجز موعد' : 'Login to Book'}</h3>
+                        <p className="text-sm text-gray-500 mt-2">{isRTL ? 'نحتاج للتحقق من هويتك لضمان جودة حجوزاتنا.' : 'We need to verify your identity to secure the booking.'}</p>
                       </div>
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'رقم الجوال' : 'Phone Number'}</label>
-                        <input type="tel" value={bookingData.phone} onChange={e => setBookingData({...bookingData, phone: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50" dir="ltr" placeholder="05XXXXXXXX" required />
-                      </div>
+                      
+                      {authStep === 'details' ? (
+                        <form onSubmit={handleSendOTP} className="space-y-6">
+                          <div className="flex p-1 bg-gray-50 rounded-xl border border-gray-200 mb-6">
+                            <button type="button" onClick={() => setAuthMode('login')} className={`flex-1 py-3 text-sm font-bold rounded-lg transition-colors ${authMode === 'login' ? 'bg-white shadow-sm border border-gray-100 text-[#2C2C2C]' : 'text-gray-500 hover:text-gray-700'}`}>{isRTL ? 'تسجيل دخول (عائد)' : 'Login (Returning)'}</button>
+                            <button type="button" onClick={() => setAuthMode('register')} className={`flex-1 py-3 text-sm font-bold rounded-lg transition-colors ${authMode === 'register' ? 'bg-white shadow-sm border border-gray-100 text-[#2C2C2C]' : 'text-gray-500 hover:text-gray-700'}`}>{isRTL ? 'حساب جديد' : 'New Account'}</button>
+                          </div>
+                          
+                          <div className="animate-in fade-in space-y-4">
+                            {authMode === 'login' ? (
+                              <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الجوال أو الإيميل' : 'Phone or Email'}</label>
+                                <input type="text" value={loginVal} onChange={e=>setLoginVal(e.target.value)} dir="ltr" placeholder="05XXXXXXXX / name@email.com" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required />
+                              </div>
+                            ) : (
+                              <div className="space-y-4">
+                                <div><label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الاسم بالكامل' : 'Full Name'}</label><input type="text" value={regFullName} onChange={e=>setRegFullName(e.target.value)} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50" required /></div>
+                                <div><label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'رقم الواتساب' : 'WhatsApp Number'}</label><input type="tel" value={regPhone} onChange={e=>setRegPhone(e.target.value)} dir="ltr" placeholder="05XXXXXXXX" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required /></div>
+                                <div><label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'البريد الإلكتروني' : 'Email Address'}</label><input type="email" value={regEmail} onChange={e=>setRegEmail(e.target.value)} dir="ltr" placeholder="name@example.com" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required /></div>
+                              </div>
+                            )}
+                          </div>
+                          
+                          <button type="submit" disabled={isAuthenticating || resendTimer>0} className={`w-full py-4 text-white font-bold rounded-xl transition-colors flex justify-center items-center gap-2 shadow-md mt-6 ${resendTimer > 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#2C2C2C] hover:bg-[#C5A059]'}`}>
+                            {isAuthenticating ? <Loader2 className="animate-spin" size={20}/> : <KeyRound size={20}/>} 
+                            {resendTimer > 0 ? (isRTL ? `انتظر ${resendTimer} ثانية للمحاولة` : `Wait ${resendTimer}s`) : (isRTL ? 'إرسال رمز التحقق' : 'Send OTP')}
+                          </button>
+                        </form>
+                      ) : (
+                        <form onSubmit={handleVerifyOTP} className="space-y-6 animate-in slide-in-from-right">
+                          <div className="text-center mb-6">
+                            <h3 className="font-bold text-xl text-[#2C2C2C]">{isRTL ? 'أدخل رمز التحقق' : 'Enter OTP Code'}</h3>
+                            <p className="text-sm text-gray-500 mt-2">{isRTL ? `أرسلنا الرمز المكون من 4 أرقام إلى ` : `A 4-digit code was sent to `} <b className="text-[#C5A059]" dir="ltr">{activeContactForOTP}</b></p>
+                          </div>
+                          <input type="text" value={otp} onChange={e=>setOtp(e.target.value)} placeholder="----" maxLength={4} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-center text-4xl tracking-[1em] font-bold" required />
+                          <button type="submit" disabled={isAuthenticating} className="w-full py-4 bg-[#C5A059] text-white font-bold rounded-xl hover:bg-[#b08d4b] flex justify-center gap-2 transition-colors shadow-md">
+                            {isAuthenticating ? <Loader2 className="animate-spin" size={20}/> : <CheckCircle size={20}/>} {isRTL ? 'تأكيد الدخول' : 'Verify & Login'}
+                          </button>
+                          <button type="button" onClick={() => setAuthStep('details')} className="w-full text-sm font-bold text-gray-400 hover:text-[#C5A059] transition-colors underline">{isRTL ? 'تعديل البيانات' : 'Edit Details'}</button>
+                        </form>
+                      )}
                     </div>
-
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'نوع الخدمة المطلوبة' : 'Service Type'}</label>
-                      <select value={bookingData.service} onChange={e => setBookingData({...bookingData, service: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50">
-                        <option value={isRTL ? 'استشارة تصميم داخلي' : 'Interior Design Consultation'}>{isRTL ? 'استشارة تصميم داخلي' : 'Interior Design Consultation'}</option>
-                        <option value={isRTL ? 'استفسار مبيعات وتفصيل' : 'Sales & Custom Furniture'}>{isRTL ? 'استفسار مبيعات وتفصيل' : 'Sales & Custom Furniture'}</option>
-                      </select>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'تاريخ الموعد' : 'Date'}</label>
-                        <input type="date" min={new Date().toISOString().split('T')[0]} value={bookingData.date} onChange={e => setBookingData({...bookingData, date: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-gray-700" required />
+                  ) : (
+                    // 2. شاشة حجز الموعد الفعلي للمستخدمين المسجلين
+                    <form className="space-y-6 animate-in fade-in" onSubmit={executeBooking}>
+                      <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-100 mb-8 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 bg-[#C5A059] text-white rounded-full flex items-center justify-center font-bold text-xl shadow-inner">{user.full_name?.charAt(0) || 'U'}</div>
+                          <div>
+                            <p className="font-bold text-[#2C2C2C] text-sm">{user.full_name}</p>
+                            <p className="text-xs text-gray-500 font-mono mt-0.5" dir="ltr">{user.phone || user.email}</p>
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => setUser(null)} className="text-xs text-red-500 font-bold hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors border border-transparent hover:border-red-100">{isRTL ? 'تسجيل خروج' : 'Logout'}</button>
                       </div>
+
                       <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الوقت المناسب' : 'Time Slot'}</label>
-                        <select value={bookingData.time} onChange={e => setBookingData({...bookingData, time: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 disabled:opacity-50" disabled={!bookingData.date} required>
-                          <option value="" disabled>{!bookingData.date ? (isRTL ? 'اختر التاريخ أولاً' : 'Select date first') : (isRTL ? 'اختر الوقت...' : 'Select time...')}</option>
-                          {availableSlots.map(slot => (
-                            <option key={slot} value={slot}>
-                              {/* تحويل صيغة 24 ساعة إلى 12 ساعة لتكون مفهومة للعميل */}
-                              {parseInt(slot) > 12 ? `${parseInt(slot) - 12}:00 PM` : parseInt(slot) === 12 ? '12:00 PM' : `${slot} AM`}
-                            </option>
-                          ))}
+                        <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'نوع الخدمة المطلوبة' : 'Service Type'}</label>
+                        <select value={bookingData.service} onChange={e=>setBookingData({...bookingData, service: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-white cursor-pointer font-bold text-gray-700">
+                          <option>{isRTL ? 'استشارة تصميم داخلي' : 'Interior Design Consultation'}</option>
+                          <option>{isRTL ? 'استفسار مبيعات وتفصيل' : 'Sales & Custom Furniture'}</option>
                         </select>
                       </div>
-                    </div>
 
-                    <button disabled={isBooking} className="w-full py-4 bg-[#2C2C2C] text-white font-bold rounded-xl hover:bg-black transition-colors shadow-lg flex justify-center items-center gap-2 mt-4 disabled:opacity-70">
-                      {isBooking ? <Loader2 className="animate-spin" size={20} /> : <Calendar size={20} />}
-                      {isRTL ? 'تأكيد الحجز' : 'Confirm Booking'}
-                    </button>
-                    <p className="text-xs text-center text-gray-400 mt-4">{isRTL ? 'سيتم إرسال رسالة تأكيد عبر الواتساب والبريد الإلكتروني لاحقاً.' : 'A confirmation will be sent via WhatsApp and Email later.'}</p>
-                  </form>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'تاريخ الموعد' : 'Date'}</label>
+                          <input type="date" min={new Date().toISOString().split('T')[0]} value={bookingData.date} onChange={e=>setBookingData({...bookingData, date: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-white cursor-pointer font-bold text-gray-700" required/>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الوقت المناسب' : 'Time Slot'}</label>
+                          <select value={bookingData.time} onChange={e=>setBookingData({...bookingData, time: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-white cursor-pointer font-bold disabled:bg-gray-100 disabled:cursor-not-allowed text-gray-700" disabled={!bookingData.date} required>
+                            <option value="" disabled>{!bookingData.date ? (isRTL ? 'اختر التاريخ أولاً' : 'Select date first') : (isRTL ? 'اختر الوقت...' : 'Select time...')}</option>
+                            {availableSlots.map(s => <option key={s} value={s}>{parseInt(s) > 12 ? `${parseInt(s) - 12}:00 PM` : parseInt(s) === 12 ? '12:00 PM' : `${s} AM`}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      <button type="submit" disabled={isBooking} className="w-full py-5 bg-[#2C2C2C] text-white font-bold rounded-2xl hover:bg-[#C5A059] transition-all shadow-xl flex justify-center items-center gap-3 mt-8 disabled:opacity-70 group">
+                        {isBooking ? <Loader2 className="animate-spin" size={24}/> : <CalendarCheck size={24} className="group-hover:scale-110 transition-transform" />} 
+                        {isRTL ? 'تأكيد الحجز الآن' : 'Confirm Booking Now'}
+                      </button>
+                    </form>
+                  )
                 )}
 
                 {/* نموذج المراسلة العادية */}

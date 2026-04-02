@@ -27,6 +27,7 @@ import { CartDrawer } from '@/components/CartDrawer';
 import { AdminDashboard } from '@/pages/AdminDashboard';
 import { AdminProducts } from '@/pages/AdminProducts';
 import { AdminOffers } from '@/pages/AdminOffers';
+import { AdminCampaigns } from '@/pages/AdminCampaigns';
 import { AdminAppearance } from '@/pages/AdminAppearance';
 import { AdminPages } from '@/pages/AdminPages';
 import { AdminOrders } from '@/pages/AdminOrders';
@@ -50,10 +51,20 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
 export default function App() {
   const { language } = useStore();
 
+  // 🌟 الكود القديم لتغيير اللغة
   useEffect(() => {
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = language;
   }, [language]);
+
+  // 🌟 الكود الجديد: فحص الجلسة كل دقيقة لحماية حساب العميل
+  useEffect(() => {
+    const interval = setInterval(() => {
+      useStore.getState().checkSession();
+    }, 60000); // 60000 مللي ثانية = دقيقة واحدة
+    return () => clearInterval(interval);
+  }, []);
+
 
   return (
     <Router>
@@ -94,11 +105,7 @@ export default function App() {
           
           {/* المرحلة 3 و 4 و 5: مسارات مستقبلية مجهزة مسبقاً */}
           <Route path="orders" element={<AdminOrders />} />
-          <Route path="campaigns" element={
-            <div className="flex items-center justify-center h-[50vh] text-gray-400 text-xl font-bold">
-              Marketing Campaigns (Coming Soon)
-            </div>
-          } />
+          <Route path="campaigns" element={<AdminCampaigns />} />
           <Route path="analytics" element={
             <div className="flex items-center justify-center h-[50vh] text-gray-400 text-xl font-bold">
               Analytics & Performance (Coming Soon)

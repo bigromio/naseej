@@ -64,7 +64,10 @@ interface StoreState {
   setLanguage: (lang: 'ar' | 'en') => void;
   
   user: User | null;
+  loginTimestamp: number | null;
   setUser: (user: User | null) => void;
+  checkSession: () => void;
+  
   
   products: Product[];
   isLoadingProducts: boolean;
@@ -97,8 +100,31 @@ export const useStore = create<StoreState>((set) => ({
   language: 'ar',
   setLanguage: (lang) => set({ language: lang }),
   
-  user: null,
-  setUser: (user) => set({ user }),
+  // سحب البيانات المحفوظة مسبقاً (إن وجدت)
+  user: JSON.parse(localStorage.getItem('naseej_user') || 'null'),
+  loginTimestamp: localStorage.getItem('naseej_user') ? Date.now() : null,
+  
+  // دالة الحفظ: تحفظ في الحالة وفي المتصفح معاً
+  setUser: (user) => {
+    if (user) {
+      localStorage.setItem('naseej_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('naseej_user');
+    }
+    set({ user, loginTimestamp: user ? Date.now() : null });
+  },
+  
+  checkSession: () => set((state) => {
+    if (state.user && state.loginTimestamp) {
+      // 20 دقيقة = 20 * 60 * 1000 مللي ثانية
+      const isExpired = (Date.now() - state.loginTimestamp) > 20 * 60 * 1000;
+      if (isExpired) {
+        alert(state.language === 'ar' ? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.' : 'Session expired. Please login again.');
+        return { user: null, loginTimestamp: null };
+      }
+    }
+    return state; // إذا لم تنتهِ الجلسة، أعد الحالة كما هي
+  }),
   
   products: [],
   isLoadingProducts: false,

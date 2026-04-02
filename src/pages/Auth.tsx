@@ -1,250 +1,260 @@
-import React, { useState } from 'react';
-import { useStore } from '@/store/useStore';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Phone, User, ArrowRight, ArrowLeft, ShieldCheck, Loader2 } from 'lucide-react';
+import { useStore } from '@/store/useStore';
+import { supabase } from '@/lib/supabase';
+import { Smartphone, Mail, KeyRound, Loader2, ArrowRight, ArrowLeft, CheckCircle, User as UserIcon } from 'lucide-react';
+
+const NOTIFICATION_API = 'http://167.86.73.97:8080/send';
 
 export const Auth = () => {
-  const { language, setUser } = useStore();
-  
-  // حالات الصفحة
-  const [isLogin, setIsLogin] = useState(true); // true = تسجيل دخول, false = حساب جديد
-  const [loginMethod, setLoginMethod] = useState<'phone' | 'email'>('phone');
-  const [step, setStep] = useState<'form' | 'otp'>('form'); // form = إدخال البيانات, otp = إدخال الرمز
-  const [isLoading, setIsLoading] = useState(false);
-  
-  // بيانات النموذج
-  const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    email: '',
-    otp: ''
-  });
+  const navigate = useNavigate();
+  const { language, user, setUser } = useStore();
+  const isRTL = language === 'ar';
 
-  // نصوص الترجمة المدمجة
-  const text = {
-    ar: {
-      loginTab: 'تسجيل الدخول',
-      registerTab: 'حساب جديد',
-      welcomeLogin: 'مرحباً بعودتك إلى نسيج',
-      welcomeRegister: 'انضم إلى عالم نسيج الفاخر',
-      phoneMethod: 'رقم الجوال',
-      emailMethod: 'البريد الإلكتروني',
-      nameTitle: 'الاسم الكامل',
-      phoneTitle: 'رقم الجوال (للواتساب)',
-      emailTitle: 'البريد الإلكتروني',
-      sendOtp: 'إرسال رمز التحقق',
-      enterOtpTitle: 'أدخل رمز التحقق',
-      otpSentTo: 'تم إرسال رمز OTP إلى',
-      verifyBtn: 'تأكيد الدخول',
-      resend: 'لم يصلك الرمز؟ إعادة إرسال',
-      back: 'تعديل البيانات'
-    },
-    en: {
-      loginTab: 'Login',
-      registerTab: 'Register',
-      welcomeLogin: 'Welcome back to Naseej',
-      welcomeRegister: 'Join Naseej Luxury World',
-      phoneMethod: 'Phone Number',
-      emailMethod: 'Email Address',
-      nameTitle: 'Full Name',
-      phoneTitle: 'WhatsApp Number',
-      emailTitle: 'Email Address',
-      sendOtp: 'Send Verification Code',
-      enterOtpTitle: 'Enter OTP Code',
-      otpSentTo: 'Code has been sent to',
-      verifyBtn: 'Verify & Login',
-      resend: 'Didn\'t receive code? Resend',
-      back: 'Edit Details'
+  useEffect(() => {
+    if (user) {
+      navigate(user.role === 'customer' ? '/dashboard' : '/admin');
+    }
+  }, [user, navigate]);
+
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authStep, setAuthStep] = useState<'details' | 'otp'>('details');
+  const [resendTimer, setResendTimer] = useState(0);
+
+  // 🌟 حالات البيانات الجديدة للتحقق الذكي الموحد 🌟
+  const [loginVal, setLoginVal] = useState(''); // لتسجيل الدخول (يقبل رقم أو إيميل)
+  const [regFullName, setRegFullName] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [activeContactForOTP, setActiveContactForOTP] = useState(''); // لحفظ المفتاح الذي سيتم التحقق منه في قاعدة البيانات
+
+  const [otp, setOtp] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+
+  useEffect(() => {
+    let interval: any;
+    if (resendTimer > 0) {
+      interval = setInterval(() => setResendTimer((prev) => prev - 1), 1000);
+    }
+    return () => clearInterval(interval);
+  }, [resendTimer]);
+
+  const formatPhoneForWhatsApp = (phone: string) => {
+    let cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.startsWith('05')) cleanPhone = '966' + cleanPhone.substring(1);
+    return cleanPhone;
+  };
+
+  // 1️⃣ إرسال الرمز الحقيقي وحفظه في قاعدة البيانات
+  const handleSendOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (resendTimer > 0) return;
+
+    let targetPhone = '';
+    let targetEmail = '';
+    let dbContactKey = '';
+
+    // 🌟 التحقق وتوزيع البيانات حسب وضع التسجيل 🌟
+    if (authMode === 'login') {
+      if (!loginVal) return alert(isRTL ? 'يرجى إدخال الجوال أو الإيميل' : 'Enter phone or email');
+      if (loginVal.includes('@')) {
+        targetEmail = loginVal;
+        dbContactKey = loginVal;
+      } else {
+        targetPhone = loginVal;
+        dbContactKey = loginVal;
+      }
+    } else {
+      if (!regFullName || !regPhone || !regEmail) {
+        return alert(isRTL ? 'يرجى تعبئة جميع الحقول' : 'Please fill all fields');
+      }
+      targetPhone = regPhone;
+      targetEmail = regEmail;
+      dbContactKey = regPhone; // نستخدم رقم الجوال كمفتاح أساسي للتحقق في الداتا بيز
+    }
+
+    setIsAuthenticating(true);
+    const newOtp = Math.floor(1000 + Math.random() * 9000).toString();
+
+    try {
+      const { error: dbError } = await supabase.from('otp_verifications').upsert({
+        contact_val: dbContactKey,
+        code: newOtp,
+        expires_at: new Date(Date.now() + 10 * 60000).toISOString()
+      }, { onConflict: 'contact_val' });
+
+      if (dbError) throw dbError;
+
+      // 🌟 تجهيز رسالة موحدة للسيرفر (سيرسل للواتساب والإيميل معاً إذا توفرا) 🌟
+      const payload: any = { brand: 'naseej' };
+      
+      if (targetPhone) {
+        payload.phone = formatPhoneForWhatsApp(targetPhone);
+        payload.message = isRTL 
+          ? `مرحباً بك في نسيج 🛋️\n\nرمز التحقق الخاص بك هو: *${newOtp}*\n\nلا تشارك هذا الرمز مع أحد.` 
+          : `Welcome to Naseej 🛋️\n\nYour OTP is: *${newOtp}*`;
+      }
+      if (targetEmail) {
+        payload.email = targetEmail;
+        payload.subject = isRTL ? 'رمز التحقق - نسيج' : 'OTP - Naseej';
+        payload.html = `<div style="text-align:center; padding:20px; font-family:Tahoma;"><h2>${isRTL ? 'رمز التحقق الخاص بك:' : 'Your OTP code:'}</h2><h1 style="color:#C5A059; letter-spacing:5px;">${newOtp}</h1></div>`;
+      }
+
+      const response = await fetch(NOTIFICATION_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error('Failed');
+      
+      setActiveContactForOTP(dbContactKey); // حفظ المرجع لخطوة التحقق
+      setResendTimer(60);
+      setAuthStep('otp');
+    } catch (error) {
+      console.error(error);
+      alert(isRTL ? 'حدث خطأ في إرسال الرمز. تأكد من اتصال السيرفر.' : 'Error sending OTP.');
+    } finally {
+      setIsAuthenticating(false);
     }
   };
 
-  const t = text[language as keyof typeof text];
-  const isRTL = language === 'ar';
-
-  // --- دوال الاتصال بالسيرفر (Contabo Placeholder) ---
-
-  const handleRequestOTP = (e: React.FormEvent) => {
+  // 2️⃣ التحقق من الرمز من قاعدة البيانات بدقة عالية
+  const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-
-    // TODO: سيتم استبدال هذا برابط سيرفر Contabo الحقيقي لاحقاً
-    const CONTABO_API_URL = 'http://192.168.1.100:3001/api/auth/send-otp';
+    if (!otp) return;
+    setIsAuthenticating(true);
     
-    console.log(`[Mock API] Sending request to: ${CONTABO_API_URL}`);
-    console.log(`[Mock API] Payload:`, {
-      type: isLogin ? 'login' : 'register',
-      method: isLogin ? loginMethod : 'both',
-      data: formData
-    });
+    try {
+      const { data: otpData, error: otpError } = await supabase
+        .from('otp_verifications')
+        .select('*')
+        .eq('contact_val', activeContactForOTP)
+        .eq('code', otp)
+        .single();
 
-    // محاكاة تأخير السيرفر (1.5 ثانية) ثم الانتقال لشاشة الرمز
-    setTimeout(() => {
-      setIsLoading(false);
-      setStep('otp');
-    }, 1500);
-  };
+      if (otpError || !otpData) {
+        setIsAuthenticating(false);
+        return alert(isRTL ? 'رمز التحقق غير صحيح!' : 'Invalid OTP code!');
+      }
 
-  const navigate = useNavigate(); // تعريف أداة التوجيه داخل المكون
+      if (new Date() > new Date(otpData.expires_at)) {
+        setIsAuthenticating(false);
+        return alert(isRTL ? 'انتهت صلاحية الرمز، يرجى طلب رمز جديد.' : 'OTP expired, please request a new one.');
+      }
 
-  const handleVerifyOTP = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
+      await supabase.from('otp_verifications').delete().eq('contact_val', activeContactForOTP);
 
-    // محاكاة الاتصال بالسيرفر
-    setTimeout(() => {
-      setIsLoading(false);
+      let finalUser = null;
       
-      // --- الباب الخلفي للمطور (Developer Bypass) ---
-      // نقوم بإجبار النظام على تسجيل الدخول كمالك بصلاحيات كاملة
-      setUser({
-        id: 'dev-owner-id-12345',
-        full_name: 'فارس العسيري (المالك)',
-        phone: formData.phone || '0500000000',
-        email: formData.email || 'admin@naseej.com',
-        role: 'owner' // هذه الكلمة هي مفتاح الدخول للوحة التحكم
-      });
+      if (authMode === 'login') {
+        // بحث عن المستخدم العائد بناءً على الإيميل أو الجوال
+        const searchColumn = activeContactForOTP.includes('@') ? 'email' : 'phone';
+        const { data: existingUser } = await supabase.from('users').select('*').eq(searchColumn, activeContactForOTP).single();
+        
+        if (existingUser) {
+          finalUser = existingUser;
+        } else {
+          const newUser = { full_name: regFullName || (isRTL ? 'عميل نسيج' : 'Naseej Customer'), phone: regPhone || activeContactForOTP, email: regEmail || activeContactForOTP, role: 'customer' };
+          const { data: insertedUser, error } = await supabase.from('users').insert([newUser]).select().single();
+          if (error) throw error;
+          finalUser = insertedUser;
 
-      // توجيه المستخدم فوراً إلى لوحة التحكم
-      navigate('/admin');
-      
-    }, 1500);
+          // 🌟 إطلاق إشعار الترحيب للعملاء الجدد 🌟
+          import('@/lib/automations').then(({ triggerAutomation }) => {
+            triggerAutomation({
+              eventName: 'welcome_msg',
+              brand: 'naseej',
+              userParams: { phone: finalUser.phone, email: finalUser.email, language: isRTL ? 'ar' : 'en' },
+              variables: { customer_name: finalUser.full_name }
+            });
+          });
+        }
+      } else {
+        // 🌟 حساب جديد متكامل البيانات 🌟
+        const { data: existingUserCheck } = await supabase.from('users').select('*').eq('phone', regPhone).maybeSingle();
+        if (existingUserCheck) {
+          finalUser = existingUserCheck; // إذا كان مسجلاً مسبقاً نعيده
+        } else {
+          const newUser = { full_name: regFullName, phone: regPhone, email: regEmail, role: 'customer' };
+          const { data: insertedUser, error } = await supabase.from('users').insert([newUser]).select().single();
+          if (error) throw error;
+          finalUser = insertedUser;
+        }
+      }
+
+      setUser(finalUser);
+    } catch (error) {
+      console.error(error);
+      alert(isRTL ? 'حدث خطأ أثناء مزامنة بياناتك.' : 'Error syncing user data.');
+    } finally {
+      setIsAuthenticating(false);
+    }
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
-      <div className="bg-white border border-gray-100 p-8 rounded-2xl shadow-xl w-full max-w-md relative overflow-hidden">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center py-20 px-4">
+      <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full border border-gray-100 animate-in fade-in zoom-in-95 duration-500">
         
-        {/* شريط زينة علوي */}
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#8C7A9E] via-[#C5A059] to-[#8C7A9E]"></div>
-
-        {step === 'form' ? (
-          <>
-            {/* تبويبات الدخول / التسجيل */}
-            <div className="flex bg-gray-50 rounded-lg p-1 mb-8">
-              <button 
-                onClick={() => setIsLogin(true)}
-                className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${isLogin ? 'bg-white text-[#2C2C2C] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                {t.loginTab}
-              </button>
-              <button 
-                onClick={() => setIsLogin(false)}
-                className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${!isLogin ? 'bg-white text-[#2C2C2C] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                {t.registerTab}
-              </button>
-            </div>
-
-            <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-[#2C2C2C] mb-2">
-                {isLogin ? t.welcomeLogin : t.welcomeRegister}
-              </h2>
-            </div>
-
-            <form onSubmit={handleRequestOTP} className="space-y-5">
-              
-              {/* حقول التسجيل الجديد */}
-              {!isLogin && (
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">{t.nameTitle}</label>
-                  <div className="relative">
-                    <User className={`absolute top-3 ${isRTL ? 'right-3' : 'left-3'} text-gray-400`} size={20} />
-                    <input 
-                      type="text" required
-                      value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})}
-                      className={`w-full p-3 ${isRTL ? 'pr-10' : 'pl-10'} border border-gray-200 rounded-lg outline-none focus:border-[#C5A059] bg-gray-50 focus:bg-white transition-all`}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* أزرار اختيار طريقة الدخول (تظهر في حالة الدخول فقط) */}
-              {isLogin && (
-                <div className="flex gap-4 mb-4">
-                  <button type="button" onClick={() => setLoginMethod('phone')} className={`flex-1 flex items-center justify-center gap-2 py-2 border rounded-lg text-sm font-bold transition-all ${loginMethod === 'phone' ? 'border-[#C5A059] text-[#C5A059] bg-[#C5A059]/5' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
-                    <Phone size={16} /> {t.phoneMethod}
-                  </button>
-                  <button type="button" onClick={() => setLoginMethod('email')} className={`flex-1 flex items-center justify-center gap-2 py-2 border rounded-lg text-sm font-bold transition-all ${loginMethod === 'email' ? 'border-[#C5A059] text-[#C5A059] bg-[#C5A059]/5' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
-                    <Mail size={16} /> {t.emailMethod}
-                  </button>
-                </div>
-              )}
-
-              {/* حقل الجوال */}
-              {(!isLogin || loginMethod === 'phone') && (
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">{t.phoneTitle}</label>
-                  <div className="relative flex" dir="ltr">
-                    <span className="flex items-center justify-center px-3 border border-r-0 border-gray-200 bg-gray-100 text-gray-600 rounded-l-lg font-bold">
-                      +966
-                    </span>
-                    <input 
-                      type="tel" required placeholder="5X XXX XXXX"
-                      value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                      className="w-full p-3 border border-gray-200 rounded-r-lg outline-none focus:border-[#C5A059] bg-gray-50 focus:bg-white transition-all"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* حقل الإيميل */}
-              {(!isLogin || loginMethod === 'email') && (
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">{t.emailTitle}</label>
-                  <div className="relative">
-                    <Mail className={`absolute top-3 ${isRTL ? 'right-3' : 'left-3'} text-gray-400`} size={20} />
-                    <input 
-                      type="email" required dir="ltr"
-                      value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})}
-                      className={`w-full p-3 ${isRTL ? 'pr-10 text-right' : 'pl-10 text-left'} border border-gray-200 rounded-lg outline-none focus:border-[#C5A059] bg-gray-50 focus:bg-white transition-all`}
-                    />
-                  </div>
-                </div>
-              )}
-
-              <button disabled={isLoading} type="submit" className="w-full py-3 mt-4 bg-[#2C2C2C] text-white rounded-lg font-bold hover:bg-black transition-colors flex justify-center items-center gap-2">
-                {isLoading ? <Loader2 className="animate-spin" size={20} /> : <>{t.sendOtp} <ShieldCheck size={20} /></>}
-              </button>
-            </form>
-          </>
-        ) : (
-          
-          /* شاشة إدخال الرمز OTP */
-          <div className="text-center animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="w-16 h-16 bg-[#C5A059]/10 text-[#C5A059] rounded-full flex items-center justify-center mx-auto mb-6">
-              <ShieldCheck size={32} />
-            </div>
-            <h2 className="text-2xl font-bold text-[#2C2C2C] mb-2">{t.enterOtpTitle}</h2>
-            <p className="text-gray-500 text-sm mb-6">
-              {t.otpSentTo} <br/> 
-              <strong className="text-black" dir="ltr">
-                {loginMethod === 'phone' ? `+966 ${formData.phone}` : formData.email}
-              </strong>
-            </p>
-
-            <form onSubmit={handleVerifyOTP}>
-              <input 
-                type="text" required maxLength={4} placeholder="• • • •" dir="ltr"
-                value={formData.otp} onChange={(e) => setFormData({...formData, otp: e.target.value.replace(/\D/g, '')})}
-                className="w-full text-center text-3xl tracking-[1em] p-4 border border-gray-200 rounded-lg outline-none focus:border-[#C5A059] bg-gray-50 focus:bg-white transition-all mb-6"
-              />
-              
-              <button disabled={isLoading || formData.otp.length < 4} type="submit" className="w-full py-3 bg-[#2C2C2C] text-white rounded-lg font-bold hover:bg-black transition-colors flex justify-center items-center disabled:opacity-50 disabled:cursor-not-allowed">
-                {isLoading ? <Loader2 className="animate-spin" size={20} /> : t.verifyBtn}
-              </button>
-            </form>
-
-            <div className="mt-6 flex flex-col gap-3">
-              <button className="text-sm font-bold text-[#C5A059] hover:underline">
-                {t.resend}
-              </button>
-              <button onClick={() => setStep('form')} className="text-sm text-gray-500 hover:text-black flex justify-center items-center gap-1">
-                {isRTL ? <ArrowRight size={16} /> : <ArrowLeft size={16} />} {t.back}
-              </button>
-            </div>
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-[#C5A059]/10 text-[#C5A059] rounded-2xl flex items-center justify-center mx-auto mb-4 rotate-3">
+            <UserIcon size={32} />
           </div>
-        )}
+          <h1 className="text-2xl font-bold text-[#2C2C2C]">{isRTL ? 'مرحباً بك في نسيج' : 'Welcome to Naseej'}</h1>
+          <p className="text-gray-500 text-sm mt-2">{isRTL ? 'سجل دخولك لمتابعة طلباتك بسهولة' : 'Login to track your orders easily'}</p>
+        </div>
 
+        {authStep === 'details' ? (
+          <form onSubmit={handleSendOTP} className="space-y-6">
+            <div className="flex p-1 bg-gray-50 rounded-xl border border-gray-200">
+              <button type="button" onClick={() => setAuthMode('login')} className={`flex-1 py-3 text-sm font-bold rounded-lg transition-colors ${authMode === 'login' ? 'bg-white text-[#2C2C2C] shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}>{isRTL ? 'تسجيل دخول' : 'Login'}</button>
+              <button type="button" onClick={() => setAuthMode('register')} className={`flex-1 py-3 text-sm font-bold rounded-lg transition-colors ${authMode === 'register' ? 'bg-white text-[#2C2C2C] shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}>{isRTL ? 'حساب جديد' : 'Register'}</button>
+            </div>
+
+            <div className="animate-in fade-in space-y-4">
+              {authMode === 'login' ? (
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'رقم الجوال أو البريد الإلكتروني' : 'Phone or Email'}</label>
+                  <input type="text" value={loginVal} onChange={e => setLoginVal(e.target.value)} dir="ltr" placeholder="05XXXXXXXX / name@email.com" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الاسم بالكامل' : 'Full Name'}</label>
+                    <input type="text" value={regFullName} onChange={e => setRegFullName(e.target.value)} placeholder={isRTL ? 'محمد عبدالله' : 'Mohammed Abdullah'} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'رقم الواتساب' : 'WhatsApp Number'}</label>
+                    <input type="tel" value={regPhone} onChange={e => setRegPhone(e.target.value)} dir="ltr" placeholder="05XXXXXXXX" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'البريد الإلكتروني' : 'Email Address'}</label>
+                    <input type="email" value={regEmail} onChange={e => setRegEmail(e.target.value)} dir="ltr" placeholder="name@example.com" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button type="button" disabled={resendTimer > 0 || isAuthenticating} onClick={handleSendOTP} className={`w-full py-4 text-white font-bold rounded-xl transition-colors flex justify-center items-center gap-2 shadow-md ${resendTimer > 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#2C2C2C] hover:bg-[#C5A059]'}`}>
+              {isAuthenticating ? <Loader2 className="animate-spin" size={20}/> : (isRTL ? <ArrowLeft size={20}/> : <ArrowRight size={20}/>)} 
+              {resendTimer > 0 ? (isRTL ? `انتظر ${resendTimer} ثانية للمحاولة` : `Wait ${resendTimer}s`) : (isRTL ? 'إرسال رمز التحقق' : 'Send OTP Code')}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleVerifyOTP} className="space-y-6 animate-in slide-in-from-right">
+            <div className="text-center mb-6">
+              <KeyRound size={40} className="text-[#C5A059] mx-auto mb-4"/>
+              <p className="text-sm text-gray-500">{isRTL ? `أرسلنا الرمز المكون من 4 أرقام إليك، يرجى التحقق.` : `A 4-digit code was sent to you.`}</p>
+            </div>
+            <div>
+              <input type="text" value={otp} onChange={e => setOtp(e.target.value)} placeholder="----" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-center text-4xl tracking-[1em] font-bold" maxLength={4} required />
+            </div>
+            <button type="submit" disabled={isAuthenticating} className="w-full py-4 bg-[#C5A059] text-white font-bold rounded-xl hover:bg-[#b08d4b] flex justify-center gap-2">
+              {isAuthenticating ? <Loader2 className="animate-spin" size={20}/> : <CheckCircle size={20}/>} {isRTL ? 'تأكيد الدخول' : 'Verify & Login'}
+            </button>
+            <button type="button" onClick={() => setAuthStep('details')} className="w-full text-sm font-bold text-gray-400 hover:text-[#C5A059] underline">{isRTL ? 'تعديل البيانات' : 'Edit Details'}</button>
+          </form>
+        )}
       </div>
     </div>
   );

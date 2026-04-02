@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useStore } from '@/store/useStore';
+import { supabase } from '@/lib/supabase'; // 👈 استدعاء قاعدة البيانات
 import { CheckCircle, MapPin, CreditCard, ShoppingBag, ArrowRight, ArrowLeft, Loader2, Plus, Server, Truck, Smartphone, KeyRound, Mail, User as UserIcon } from 'lucide-react';
+import { triggerAutomation } from '@/lib/automations';
 
 // عنوان سيرفر Contabo الخاص بك
 const NOTIFICATION_API = 'http://167.86.73.97:8080/send';
@@ -14,24 +16,35 @@ export const Checkout = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [orderId, setOrderId] = useState('');
+  const [finalTotal, setFinalTotal] = useState(0); // 👈 متغير جديد لحفظ الإجمالي الحقيقي لصفحة الشكر
   
   const [address, setAddress] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'tabby' | 'tamara'>('card');
 
   // ==========================================
-  // 🌟 نظام تسجيل الدخول المدمج (Real OTP)
+  // 🌟 نظام تسجيل الدخول المدمج الذكي (Unified OTP)
   // ==========================================
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [authMethod, setAuthMethod] = useState<'phone' | 'email'>('phone');
   const [authStep, setAuthStep] = useState<'details' | 'otp'>('details');
-  
-  const [contactVal, setContactVal] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [resendTimer, setResendTimer] = useState(0);
+
+  const [loginVal, setLoginVal] = useState(''); 
+  const [regFullName, setRegFullName] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [activeContactForOTP, setActiveContactForOTP] = useState(''); 
+
   const [otp, setOtp] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState(''); // حفظ الرمز الحقيقي هنا
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
-  // دالة تنسيق رقم الجوال ليقبله الواتساب (تحويل 05 إلى 9665)
+  useEffect(() => {
+    let interval: any;
+    if (resendTimer > 0) {
+      interval = setInterval(() => setResendTimer((prev) => prev - 1), 1000);
+    }
+    return () => clearInterval(interval);
+  }, [resendTimer]);
+
   const formatPhoneForWhatsApp = (phone: string) => {
     let cleanPhone = phone.replace(/\D/g, '');
     if (cleanPhone.startsWith('05')) {
@@ -40,79 +53,144 @@ export const Checkout = () => {
     return cleanPhone;
   };
 
-  // 1️⃣ إرسال الرمز الحقيقي عبر سيرفرك
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!contactVal) return;
-    if (authMode === 'register' && !fullName) {
-      alert(isRTL ? 'يرجى إدخال الاسم الكريم' : 'Please enter your full name');
-      return;
+    if (resendTimer > 0) return;
+
+    let targetPhone = '';
+    let targetEmail = '';
+    let dbContactKey = '';
+
+    if (authMode === 'login') {
+      if (!loginVal) return alert(isRTL ? 'يرجى إدخال الجوال أو الإيميل' : 'Enter phone or email');
+      if (loginVal.includes('@')) {
+        targetEmail = loginVal;
+        dbContactKey = loginVal;
+      } else {
+        targetPhone = loginVal;
+        dbContactKey = loginVal;
+      }
+    } else {
+      if (!regFullName || !regPhone || !regEmail) {
+        return alert(isRTL ? 'يرجى تعبئة جميع الحقول' : 'Please fill all fields');
+      }
+      targetPhone = regPhone;
+      targetEmail = regEmail;
+      dbContactKey = regPhone; 
     }
 
     setIsAuthenticating(true);
-    
-    // إنشاء رمز OTP عشوائي من 4 أرقام
     const newOtp = Math.floor(1000 + Math.random() * 9000).toString();
-    setGeneratedOtp(newOtp);
 
     try {
-      const payload: any = {};
+      const { error: dbError } = await supabase.from('otp_verifications').upsert({
+        contact_val: dbContactKey,
+        code: newOtp,
+        expires_at: new Date(Date.now() + 10 * 60000).toISOString()
+      }, { onConflict: 'contact_val' });
+
+      if (dbError) throw dbError;
+
+      const payload: any = { brand: 'naseej' };
       
-      if (authMethod === 'phone') {
-        payload.phone = formatPhoneForWhatsApp(contactVal);
+      if (targetPhone) {
+        payload.phone = formatPhoneForWhatsApp(targetPhone);
         payload.message = isRTL 
           ? `مرحباً بك في نسيج 🛋️\n\nرمز التحقق الخاص بك هو: *${newOtp}*\n\nلا تشارك هذا الرمز مع أحد.` 
-          : `Welcome to Naseej 🛋️\n\nYour OTP code is: *${newOtp}*\n\nDo not share this code.`;
-      } else {
-        payload.email = contactVal;
-        payload.subject = isRTL ? 'رمز التحقق - نسيج' : 'OTP Verification - Naseej';
-        payload.html = `
-          <div style="text-align: center; padding: 20px; font-family: Tahoma;">
-            <h2>${isRTL ? 'مرحباً بك في نسيج' : 'Welcome to Naseej'}</h2>
-            <p>${isRTL ? 'رمز التحقق الخاص بك هو:' : 'Your OTP code is:'}</p>
-            <h1 style="color: #C5A059; letter-spacing: 5px; font-size: 32px;">${newOtp}</h1>
-          </div>
-        `;
+          : `Welcome to Naseej 🛋️\n\nYour OTP is: *${newOtp}*`;
+      }
+      if (targetEmail) {
+        payload.email = targetEmail;
+        payload.subject = isRTL ? 'رمز التحقق - نسيج' : 'OTP - Naseej';
+        payload.html = `<div style="text-align:center; padding:20px; font-family:Tahoma;"><h2>${isRTL ? 'رمز التحقق الخاص بك:' : 'Your OTP code:'}</h2><h1 style="color:#C5A059; letter-spacing:5px;">${newOtp}</h1></div>`;
       }
 
-      // إرسال الطلب إلى سيرفر Contabo
       const response = await fetch(NOTIFICATION_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
-      if (!response.ok) throw new Error('Failed to send message via Server');
-
-      setAuthStep('otp'); // الانتقال لشاشة إدخال الرمز
+      if (!response.ok) throw new Error('Failed');
+      
+      setActiveContactForOTP(dbContactKey);
+      setResendTimer(60); 
+      setAuthStep('otp');
     } catch (error) {
       console.error(error);
-      alert(isRTL ? 'حدث خطأ في الإرسال. تأكد من صحة البيانات أو عمل السيرفر.' : 'Failed to send OTP. Please check your connection.');
+      alert(isRTL ? 'حدث خطأ في إرسال الرمز.' : 'Error sending OTP.');
     } finally {
       setIsAuthenticating(false);
     }
   };
 
-  // 2️⃣ التحقق من الرمز المدخل
-  const handleVerifyOTP = (e: React.FormEvent) => {
+  const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!otp) return;
-    
     setIsAuthenticating(true);
     
-    // مطابقة الرمز المدخل مع الرمز المولد حقيقياً
-    if (otp === generatedOtp) {
+    try {
+      const { data: otpData, error: otpError } = await supabase
+        .from('otp_verifications')
+        .select('*')
+        .eq('contact_val', activeContactForOTP)
+        .eq('code', otp)
+        .single();
+
+      if (otpError || !otpData) {
+        setIsAuthenticating(false);
+        return alert(isRTL ? 'رمز التحقق غير صحيح!' : 'Invalid OTP code!');
+      }
+
+      if (new Date() > new Date(otpData.expires_at)) {
+        setIsAuthenticating(false);
+        return alert(isRTL ? 'انتهت صلاحية الرمز، يرجى طلب رمز جديد.' : 'OTP expired, please request a new one.');
+      }
+
+      await supabase.from('otp_verifications').delete().eq('contact_val', activeContactForOTP);
+
+      let finalUser = null;
+      
+      if (authMode === 'login') {
+        const searchColumn = activeContactForOTP.includes('@') ? 'email' : 'phone';
+        const { data: existingUser } = await supabase.from('users').select('*').eq(searchColumn, activeContactForOTP).single();
+        
+        if (existingUser) {
+          finalUser = existingUser;
+        } else {
+          const newUser = { full_name: regFullName || (isRTL ? 'عميل نسيج' : 'Naseej Customer'), phone: regPhone || activeContactForOTP, email: regEmail || activeContactForOTP, role: 'customer' };
+          const { data: insertedUser, error } = await supabase.from('users').insert([newUser]).select().single();
+          if (error) throw error;
+          finalUser = insertedUser;
+
+          // 🌟 إطلاق إشعار الترحيب للعملاء الجدد 🌟
+          import('@/lib/automations').then(({ triggerAutomation }) => {
+            triggerAutomation({
+              eventName: 'welcome_msg',
+              brand: 'naseej',
+              userParams: { phone: finalUser.phone, email: finalUser.email, language: isRTL ? 'ar' : 'en' },
+              variables: { customer_name: finalUser.full_name }
+            });
+          });
+        }
+      } else {
+        const { data: existingUserCheck } = await supabase.from('users').select('*').eq('phone', regPhone).maybeSingle();
+        if (existingUserCheck) {
+          finalUser = existingUserCheck;
+        } else {
+          const newUser = { full_name: regFullName, phone: regPhone, email: regEmail, role: 'customer' };
+          const { data: insertedUser, error } = await supabase.from('users').insert([newUser]).select().single();
+          if (error) throw error;
+          finalUser = insertedUser;
+        }
+      }
+
+      setUser(finalUser);
+    } catch (error) {
+      console.error(error);
+      alert(isRTL ? 'حدث خطأ أثناء مزامنة بياناتك.' : 'Error syncing user data.');
+    } finally {
       setIsAuthenticating(false);
-      setUser({
-        id: 'user-' + Math.floor(Math.random() * 10000),
-        full_name: authMode === 'register' ? fullName : (isRTL ? 'عميل نسيج العائد' : 'Returning Customer'),
-        phone: authMethod === 'phone' ? contactVal : '',
-        email: authMethod === 'email' ? contactVal : '',
-        role: 'customer'
-      });
-    } else {
-      setIsAuthenticating(false);
-      alert(isRTL ? 'رمز التحقق غير صحيح، حاول مجدداً.' : 'Invalid OTP code. Please try again.');
     }
   };
 
@@ -136,34 +214,24 @@ export const Checkout = () => {
     setOrderId(newOrderId);
 
     try {
-      // تجهيز رسالة الفاتورة
-      const invoiceText = isRTL 
-        ? `🎉 شكراً لتسوقك من نسيج يا ${user?.full_name}!\n\n📦 *رقم الطلب:* #${newOrderId}\n💰 *الإجمالي:* ${total} ر.س\n💳 *طريقة الدفع:* ${paymentMethod.toUpperCase()}\n\nجاري تجهيز طلبك وسيتم التواصل معك قريباً.`
-        : `🎉 Thank you for shopping with Naseej, ${user?.full_name}!\n\n📦 *Order ID:* #${newOrderId}\n💰 *Total:* ${total} SAR\n💳 *Payment Method:* ${paymentMethod.toUpperCase()}\n\nYour order is being processed.`;
-
-      const payload: any = {};
-      if (user?.phone) {
-        payload.phone = formatPhoneForWhatsApp(user.phone);
-        payload.message = invoiceText;
-      } else if (user?.email) {
-        payload.email = user.email;
-        payload.subject = isRTL ? `تأكيد الطلب #${newOrderId} - نسيج` : `Order Confirmation #${newOrderId} - Naseej`;
-        payload.html = `
-          <div dir="${isRTL ? 'rtl' : 'ltr'}" style="text-align: start; padding: 20px; font-family: Tahoma;">
-            <h2 style="color: #C5A059;">${isRTL ? 'تم تأكيد طلبك!' : 'Order Confirmed!'}</h2>
-            <p>${invoiceText.replace(/\n/g, '<br>')}</p>
-          </div>
-        `;
-      }
-
-      // إرسال الإشعار عبر السيرفر
-      await fetch(NOTIFICATION_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      // 🌟 تشغيل محرك الأوتوميشن الشامل 🌟
+      await triggerAutomation({
+        eventName: 'order_confirmed',
+        brand: 'naseej',
+        userParams: {
+          phone: user?.phone,
+          email: user?.email,
+          language: language
+        },
+        variables: {
+          customer_name: user?.full_name || (isRTL ? 'عميلنا العزيز' : 'Dear Customer'),
+          order_id: newOrderId,
+          total: total.toLocaleString()
+        }
       });
 
-      // إتمام العملية بنجاح وتفريغ السلة
+      // إتمام العملية بنجاح
+      setFinalTotal(total); // 👈 حفظ الإجمالي هنا قبل مسح السلة
       setIsSubmitting(false);
       setIsSuccess(true);
       clearCart();
@@ -196,7 +264,8 @@ export const Checkout = () => {
           <div className="bg-gray-50 rounded-2xl p-6 mb-8 text-start border border-gray-100">
             <div className="flex justify-between items-center mb-2"><span className="text-gray-500 text-sm">{isRTL ? 'رقم الطلب:' : 'Order ID:'}</span><span className="font-bold text-[#2C2C2C]">#{orderId}</span></div>
             <div className="flex justify-between items-center"><span className="text-gray-500 text-sm">{isRTL ? 'طريقة الدفع:' : 'Payment:'}</span><span className="font-bold text-[#2C2C2C] uppercase">{paymentMethod}</span></div>
-            <div className="flex justify-between items-center mt-2 border-t border-gray-200 pt-2"><span className="text-gray-500 text-sm">{isRTL ? 'الإجمالي:' : 'Total:'}</span><span className="font-bold text-[#2C2C2C]">{total.toLocaleString()} {isRTL ? 'ر.س' : 'SAR'}</span></div>
+            {/* 👈 استخدام finalTotal هنا بدلاً من total */}
+            <div className="flex justify-between items-center mt-2 border-t border-gray-200 pt-2"><span className="text-gray-500 text-sm">{isRTL ? 'الإجمالي:' : 'Total:'}</span><span className="font-bold text-[#2C2C2C]">{finalTotal.toLocaleString()} {isRTL ? 'ر.س' : 'SAR'}</span></div>
           </div>
           <Link to="/shop" className="inline-flex items-center gap-2 bg-[#2C2C2C] text-white px-8 py-4 rounded-xl font-bold hover:bg-[#C5A059] transition-colors shadow-md">
             <ShoppingBag size={20} /> {isRTL ? 'مواصلة التسوق' : 'Continue Shopping'}
@@ -234,36 +303,37 @@ export const Checkout = () => {
                       </button>
                     </div>
 
-                    <div className="flex gap-4">
-                      <label className={`flex-1 flex items-center justify-center gap-2 p-4 border-2 rounded-xl cursor-pointer transition-colors ${authMethod === 'phone' ? 'border-[#C5A059] bg-[#C5A059]/5' : 'border-gray-100 hover:border-gray-200'}`}>
-                        <input type="radio" name="method" checked={authMethod === 'phone'} onChange={() => setAuthMethod('phone')} className="hidden" />
-                        <Smartphone size={20} className={authMethod === 'phone' ? 'text-[#C5A059]' : 'text-gray-400'} />
-                        <span className={`font-bold ${authMethod === 'phone' ? 'text-[#C5A059]' : 'text-gray-500'}`}>{isRTL ? 'واتساب' : 'WhatsApp'}</span>
-                      </label>
-                      <label className={`flex-1 flex items-center justify-center gap-2 p-4 border-2 rounded-xl cursor-pointer transition-colors ${authMethod === 'email' ? 'border-[#C5A059] bg-[#C5A059]/5' : 'border-gray-100 hover:border-gray-200'}`}>
-                        <input type="radio" name="method" checked={authMethod === 'email'} onChange={() => setAuthMethod('email')} className="hidden" />
-                        <Mail size={20} className={authMethod === 'email' ? 'text-[#C5A059]' : 'text-gray-400'} />
-                        <span className={`font-bold ${authMethod === 'email' ? 'text-[#C5A059]' : 'text-gray-500'}`}>{isRTL ? 'إيميل' : 'Email'}</span>
-                      </label>
+                    <div className="animate-in fade-in space-y-4">
+                      {authMode === 'login' ? (
+                        <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'رقم الجوال أو البريد الإلكتروني' : 'Phone or Email'}</label>
+                          <input type="text" value={loginVal} onChange={e => setLoginVal(e.target.value)} dir="ltr" placeholder="05XXXXXXXX / name@email.com" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required />
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الاسم بالكامل' : 'Full Name'}</label>
+                            <input type="text" value={regFullName} onChange={e => setRegFullName(e.target.value)} placeholder={isRTL ? 'محمد عبدالله' : 'Mohammed Abdullah'} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50" required />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'رقم الواتساب' : 'WhatsApp Number'}</label>
+                            <input type="tel" value={regPhone} onChange={e => setRegPhone(e.target.value)} dir="ltr" placeholder="05XXXXXXXX" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'البريد الإلكتروني' : 'Email Address'}</label>
+                            <input type="email" value={regEmail} onChange={e => setRegEmail(e.target.value)} dir="ltr" placeholder="name@example.com" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    {authMode === 'register' && (
-                      <div className="animate-in slide-in-from-top-2">
-                        <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الاسم بالكامل' : 'Full Name'}</label>
-                        <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50" required />
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-2">
-                        {authMethod === 'phone' ? (isRTL ? 'رقم الجوال' : 'Phone Number') : (isRTL ? 'البريد الإلكتروني' : 'Email Address')}
-                      </label>
-                      <input type={authMethod === 'phone' ? 'tel' : 'email'} value={contactVal} onChange={e => setContactVal(e.target.value)} dir="ltr" placeholder={authMethod === 'phone' ? '05XXXXXXXX' : 'name@example.com'} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-end font-mono" required />
-                    </div>
-
-                    <button type="submit" disabled={isAuthenticating} className="w-full py-4 bg-[#2C2C2C] text-white font-bold rounded-xl hover:bg-[#C5A059] transition-colors flex justify-center items-center gap-2 shadow-md">
+                    <button 
+                      type="submit" 
+                      disabled={resendTimer > 0 || isAuthenticating}
+                      className={`w-full py-4 text-white font-bold rounded-xl transition-colors flex justify-center items-center gap-2 shadow-md ${resendTimer > 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#2C2C2C] hover:bg-[#C5A059]'}`}
+                    >
                       {isAuthenticating ? <Loader2 className="animate-spin" size={20}/> : (isRTL ? <ArrowLeft size={20}/> : <ArrowRight size={20}/>)} 
-                      {isRTL ? 'إرسال رمز التحقق' : 'Send OTP'}
+                      {resendTimer > 0 ? (isRTL ? `انتظر ${resendTimer} ثانية للمحاولة` : `Wait ${resendTimer}s`) : (isRTL ? 'إرسال رمز التحقق' : 'Send OTP Code')}
                     </button>
                   </form>
                 ) : (
@@ -271,7 +341,7 @@ export const Checkout = () => {
                     <div className="text-center mb-6">
                       <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-100"><KeyRound size={28} className="text-[#C5A059]"/></div>
                       <h3 className="font-bold text-xl text-[#2C2C2C]">{isRTL ? 'أدخل رمز التحقق' : 'Enter OTP Code'}</h3>
-                      <p className="text-sm text-gray-500 mt-2">{isRTL ? `أرسلنا الرمز المكون من 4 أرقام إلى ` : `A 4-digit code was sent to `} <b className="text-[#C5A059]" dir="ltr">{contactVal}</b></p>
+                      <p className="text-sm text-gray-500 mt-2">{isRTL ? `أرسلنا الرمز المكون من 4 أرقام إلى ` : `A 4-digit code was sent to `} <b className="text-[#C5A059]" dir="ltr">{activeContactForOTP}</b></p>
                     </div>
                     <div>
                       <input type="text" value={otp} onChange={e => setOtp(e.target.value)} placeholder="----" className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 text-center text-4xl tracking-[1em] font-bold" maxLength={4} required />
@@ -287,7 +357,10 @@ export const Checkout = () => {
               <form id="checkout-form" onSubmit={handlePlaceOrder} className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in slide-in-from-bottom-4">
                 <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
                   <h2 className="text-xl font-bold text-[#2C2C2C] flex items-center gap-2"><CheckCircle className="text-green-500" size={24}/> {isRTL ? 'تم التحقق من بياناتك' : 'Verified Details'}</h2>
-                  <button type="button" onClick={() => setUser(null)} className="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">{isRTL ? 'تسجيل خروج' : 'Logout'}</button>
+                  <div className="flex items-center gap-3">
+                    <span className="bg-gray-100 text-[#2C2C2C] px-3 py-1 rounded-md text-xs font-bold uppercase">{user.role}</span>
+                    <button type="button" onClick={() => setUser(null)} className="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">{isRTL ? 'تسجيل خروج' : 'Logout'}</button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                   <div><label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الاسم بالكامل' : 'Full Name'}</label><input type="text" value={user.full_name || ''} disabled className="w-full p-4 border border-gray-200 rounded-xl bg-gray-50 text-gray-500 cursor-not-allowed font-bold" /></div>

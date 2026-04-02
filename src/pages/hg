@@ -1,0 +1,334 @@
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const express = require('express');
+const cors = require('cors');
+const nodemailer = require('nodemailer');
+const { createClient } = require('@supabase/supabase-js');
+const { exec } = require('child_process');
+const fetch = require('cross-fetch');
+
+// ==========================================
+// 1. إعدادات قاعدة البيانات (Supabase)
+// ==========================================
+// ⚠️ ضع رابط ومفتاح مشروع Supabase الخاص بك هنا
+const SUPABASE_URL = 'https://okhugydgtuyqznwcgusn.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9raHVneWRndHV5cXpud2NndXNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxMDgzOTIsImV4cCI6MjA4OTY4NDM5Mn0.FTMISFsEClMGusS8hht400u-4NiBKw5qBHUKRfHHfVQ';
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+    global: { fetch: fetch }
+});
+
+const app = express();
+app.use(cors({ origin: '*' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// ==========================================
+// 2. مدير الجلسات المركزي (Multi-Tenancy Manager)
+// ==========================================
+const waClients = new Map(); // يحفظ جلسات الواتساب (المتصفحات)
+const restartTimers = new Map(); // يحفظ مؤقتات تفريغ الذاكرة لكل براند
+
+// دالة لتحديث حالة الواتساب في Supabase
+async function updateWaStatus(projectName, status, qrCode = '') {
+    await supabase.from('integration_settings')
+        .update({ wa_status: status, wa_qr_code: qrCode })
+        .eq('project_name', projectName);
+}
+
+// دالة تشغيل محرك واتساب مخصص لبراند معين
+async function initializeWhatsAppClient(project) {
+    const { project_name, wa_session_id, pm2_restart_minutes } = project;
+    
+    console.log(`\n🔄 جاري تشغيل محرك الواتساب لبراند: [${project_name.toUpperCase()}]...`);
+    
+    // إذا كان يعمل مسبقاً، نغلقه أولاً لتفريغ الذاكرة
+    if (waClients.has(project_name)) {
+        console.log(`🧹 تفريغ ذاكرة المتصفح لبراند [${project_name}]...`);
+        await waClients.get(project_name).destroy();
+        waClients.delete(project_name);
+    }
+
+    const client = new Client({
+        authStrategy: new LocalAuth({ clientId: wa_session_id }),
+        authTimeoutMs: 60000,
+        puppeteer: {
+            executablePath: '/usr/bin/google-chrome',
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        }
+    });
+
+    client.on('qr', async (qr) => {
+        console.log(`📱 تم توليد QR لبراند [${project_name}]. جاري إرساله للوحة التحكم...`);
+        await updateWaStatus(project_name, 'qr_ready', qr);
+    });
+
+    client.on('ready', async () => {
+        console.log(`✅ [${project_name}] واتساب متصل وجاهز للعمل!`);
+        await updateWaStatus(project_name, 'connected', '');
+        
+        // 🌟 نظام تفريغ الذاكرة المعزول (Per-Brand Memory Management)
+        if (restartTimers.has(project_name)) clearInterval(restartTimers.get(project_name));
+        
+        const intervalMs = (pm2_restart_minutes || 30) * 60 * 1000;
+        const timer = setInterval(() => {
+            console.log(`\n⏳ [جدولة] تفريغ الذاكرة لبراند ${project_name}...`);
+            initializeWhatsAppClient(project); // إعادة التشغيل الذاتية
+        }, intervalMs);
+        
+        restartTimers.set(project_name, timer);
+    });
+
+    client.on('disconnected', async (reason) => {
+        console.log(`⚠️ [${project_name}] تم قطع اتصال الواتساب:`, reason);
+        await updateWaStatus(project_name, 'disconnected', '');
+        if (restartTimers.has(project_name)) clearInterval(restartTimers.get(project_name));
+    });
+
+    await client.initialize();
+    waClients.set(project_name, client);
+}
+
+// ==========================================
+// 3. محرك المزامنة (Sync Engine)
+// ==========================================
+async function syncIntegrations() {
+    console.log('\n📡 جاري المزامنة مع قاعدة بيانات Supabase...');
+    const { data: settings, error } = await supabase.from('integration_settings').select('*');
+    
+    if (error) {
+        console.error('❌ خطأ في الاتصال بقاعدة البيانات:', error.message);
+        return;
+    }
+
+    // تشغيل متصفح واتساب لكل براند موجود في القاعدة
+    for (const project of settings) {
+        if (!waClients.has(project.project_name)) {
+            await initializeWhatsAppClient(project);
+        }
+    }
+}
+
+// بدء المزامنة عند تشغيل السيرفر
+syncIntegrations();
+
+// ==========================================
+// 4. راوتر الاستقبال (API Endpoints)
+// ==========================================
+
+// أ. مسار إرسال الرسائل (واتساب + إيميل)
+app.post('/send', async (req, res) => {
+    let { brand, phone, email, message, subject, html, mediaUrl } = req.body;
+    let whatsappStatus = 'تخطي';
+    let emailStatus = 'تخطي';
+
+    // 🌟 التوافق مع الأنظمة القديمة: إذا لم يتم تحديد براند، اعتبره أوكرة
+    if (!brand) brand = 'ukra';
+
+    console.log(`\n📥 [طلب جديد] مرسل من براند: ${brand}`);
+
+    // --- إرسال الواتساب ---
+    if (phone && (message || mediaUrl)) {
+        const client = waClients.get(brand);
+        if (!client) {
+            whatsappStatus = 'البراند غير مفعل أو غير متصل';
+        } else {
+            try {
+                let cleanPhone = phone.replace(/\D/g, '');
+                if (cleanPhone.startsWith('05')) cleanPhone = '966' + cleanPhone.substring(1);
+                const chatId = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@c.us`;
+
+                if (mediaUrl) {
+                    let media;
+                    if (mediaUrl.startsWith('data:')) {
+                        const mimeType = mediaUrl.split(';')[0].split(':')[1];
+                        const base64Data = mediaUrl.split(',')[1];
+                        media = new MessageMedia(mimeType, base64Data, 'Document.pdf');
+                    } else {
+                        media = await MessageMedia.fromUrl(mediaUrl, { unsafeMime: true });
+                    }
+                    await client.sendMessage(chatId, media, { caption: message || '' });
+                } else {
+                    await client.sendMessage(chatId, message);
+                }
+                whatsappStatus = 'نجاح';
+                console.log(`✅ [واتساب] تم الإرسال للرقم: ${phone}`);
+            } catch (error) {
+                console.error('⚠️ [واتساب] فشل الإرسال:', error.message);
+                whatsappStatus = 'فشل';
+            }
+        }
+    }
+
+    // --- إرسال الإيميل (ديناميكي بناءً على إعدادات البراند) ---
+    if (email && (message || html)) {
+        try {
+            const { data: brandSettings } = await supabase.from('integration_settings').select('*').eq('project_name', brand).single();
+            
+            if (brandSettings && brandSettings.smtp_host) {
+                const transporter = nodemailer.createTransport({
+                    host: brandSettings.smtp_host,
+                    port: brandSettings.smtp_port,
+                    secure: brandSettings.smtp_port === 465,
+                    auth: { user: brandSettings.smtp_user, pass: brandSettings.smtp_pass }
+                });
+
+                await transporter.sendMail({
+                    from: `"${brandSettings.smtp_from_name}" <${brandSettings.smtp_user}>`,
+                    to: email,
+                    subject: subject || `إشعار من ${brandSettings.smtp_from_name}`,
+                    text: message || '',
+                    html: html || message
+                });
+                emailStatus = 'نجاح';
+                console.log(`✅ [إيميل] تم الإرسال إلى: ${email}`);
+            } else {
+                emailStatus = 'لا توجد إعدادات SMTP';
+            }
+        } catch (error) {
+            console.error('⚠️ [إيميل] فشل الإرسال:', error.message);
+            emailStatus = 'فشل';
+        }
+    }
+
+    res.json({ success: true, brand, whatsapp: whatsappStatus, email: emailStatus });
+});
+
+// ب. مسار تحديث مكتبة الواتساب من لوحة التحكم
+app.post('/api/server/update', (req, res) => {
+    console.log('🔄 استلام أمر تحديث مكتبة الواتساب من لوحة التحكم...');
+    res.json({ message: "جاري التحديث وإعادة التشغيل..." });
+    exec('npm install whatsapp-web.js@latest && pm2 restart all', (err) => {
+        if (err) console.error('خطأ في التحديث:', err);
+    });
+});
+
+
+// ==========================================
+// 5. محرك طابور الحملات الإعلانية (Background Job Worker)
+// ==========================================
+let isProcessingQueue = false;
+
+async function processCampaignQueue() {
+    // إذا كان المحرك مشغولاً بإرسال رسالة، انتظر
+    if (isProcessingQueue) return;
+    isProcessingQueue = true;
+
+    try {
+        // 1. البحث عن حملة قيد الانتظار أو قيد التشغيل
+        const { data: campaigns, error } = await supabase
+            .from('campaign_queues')
+            .select('*')
+            .in('status', ['pending', 'processing'])
+            .order('created_at', { ascending: true })
+            .limit(1);
+
+        if (error || !campaigns || campaigns.length === 0) {
+            isProcessingQueue = false;
+            return; // لا يوجد حملات حالياً
+        }
+
+        const campaign = campaigns[0];
+
+        // 2. تحديث الحالة إلى processing إذا كانت pending
+        if (campaign.status === 'pending') {
+            await supabase.from('campaign_queues').update({ status: 'processing' }).eq('id', campaign.id);
+            console.log(`\n🚀 [الحملات] بدء تشغيل حملة جديدة لبراند: ${campaign.project_name}`);
+        }
+
+        const audience = campaign.target_audience || [];
+        let currentIndex = campaign.processed_count || 0;
+
+        // 3. التحقق مما إذا انتهت الحملة
+        if (currentIndex >= campaign.total_count || currentIndex >= audience.length) {
+            await supabase.from('campaign_queues').update({ status: 'completed' }).eq('id', campaign.id);
+            console.log(`✅ [الحملات] تم الانتهاء من حملة البراند: ${campaign.project_name} بنجاح!`);
+            isProcessingQueue = false;
+            return;
+        }
+
+        // 4. سحب العميل الذي عليه الدور
+        const customer = audience[currentIndex];
+        const { project_name: brand, channel, message, media_url, delay_seconds } = campaign;
+
+        console.log(`⏳ [طابور الحملات] إرسال لـ ${customer.name} (${currentIndex + 1}/${campaign.total_count}) - القناة: ${channel}`);
+
+        // تخصيص الرسالة باسم العميل
+        let finalMessage = message.replace(/{{customer_name}}/g, customer.name || 'عميلنا العزيز');
+
+        // 5. الإرسال الفعلي
+        if (channel === 'whatsapp' && customer.contact) {
+            const client = waClients.get(brand);
+            if (client) {
+                let cleanPhone = customer.contact.replace(/\D/g, '');
+                if (cleanPhone.startsWith('05')) cleanPhone = '966' + cleanPhone.substring(1);
+                const chatId = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@c.us`;
+
+                try {
+                    if (media_url) {
+                        let media;
+                        if (media_url.startsWith('data:')) {
+                            const mimeType = media_url.split(';')[0].split(':')[1];
+                            const base64Data = media_url.split(',')[1];
+                            media = new MessageMedia(mimeType, base64Data, 'Document.pdf');
+                        } else {
+                            media = await MessageMedia.fromUrl(media_url, { unsafeMime: true });
+                        }
+                        await client.sendMessage(chatId, media, { caption: finalMessage });
+                    } else {
+                        await client.sendMessage(chatId, finalMessage);
+                    }
+                } catch (err) {
+                    console.error(`⚠️ خطأ إرسال واتساب لـ ${customer.contact}:`, err.message);
+                }
+            }
+        } else if (channel === 'email' && customer.contact) {
+            try {
+                const { data: brandSettings } = await supabase.from('integration_settings').select('*').eq('project_name', brand).single();
+                if (brandSettings && brandSettings.smtp_host) {
+                    const transporter = nodemailer.createTransport({
+                        host: brandSettings.smtp_host,
+                        port: brandSettings.smtp_port,
+                        secure: brandSettings.smtp_port === 465,
+                        auth: { user: brandSettings.smtp_user, pass: brandSettings.smtp_pass }
+                    });
+                    await transporter.sendMail({
+                        from: `"${brandSettings.smtp_from_name}" <${brandSettings.smtp_user}>`,
+                        to: customer.contact,
+                        subject: `إشعار من ${brandSettings.smtp_from_name}`,
+                        html: `<div dir="rtl" style="font-family: Tahoma; line-height: 1.8;">${finalMessage.replace(/\n/g, '<br>')}</div>`
+                    });
+                }
+            } catch (err) {
+                console.error(`⚠️ خطأ إرسال إيميل لـ ${customer.contact}:`, err.message);
+            }
+        }
+
+        // 6. تحديث العداد في قاعدة البيانات (لحفظ التقدم في حال انطفأ السيرفر)
+        await supabase.from('campaign_queues').update({ processed_count: currentIndex + 1 }).eq('id', campaign.id);
+
+        // 7. الانتظار (تأخير الإرسال المضاد للحظر) ثم تحرير المحرك للرسالة التالية
+        const waitTime = (delay_seconds || 5) * 1000;
+        setTimeout(() => {
+            isProcessingQueue = false; 
+        }, waitTime);
+
+    } catch (error) {
+        console.error('❌ خطأ في محرك الطابور:', error);
+        isProcessingQueue = false;
+    }
+}
+
+// تشغيل الفاحص الذكي كل 3 ثوانٍ (سيبدأ العمل فقط إذا لم يكن مشغولاً وتوفرت حملة)
+setInterval(processCampaignQueue, 3000);
+
+// ج. مسار إعادة تشغيل/مزامنة السيرفر لطلب QR جديد
+app.post('/api/server/restart', (req, res) => {
+    console.log('🔄 استلام أمر المزامنة وإعادة التشغيل من لوحة التحكم...');
+    syncIntegrations();
+    res.json({ message: "تم إرسال أمر المزامنة وإعادة تشغيل المتصفحات." });
+});
+
+const PORT = 8080;
+app.listen(PORT, () => {
+    console.log(`\n🚀 سيرفر الإشعارات المركزي (Multi-Tenant) يعمل بامتياز على بورت ${PORT}`);
+});
