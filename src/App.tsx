@@ -82,7 +82,7 @@ export default function App() {
           <Route path="/checkout" element={<Checkout />} />
           
           <Route path="/dashboard" element={
-            <ProtectedRoute allowedRoles={['customer']}>
+            <ProtectedRoute allowedRoles={['customer', 'owner', 'manager', 'employee']}>
               <CustomerDashboard />
             </ProtectedRoute>
           } />

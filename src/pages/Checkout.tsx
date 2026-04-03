@@ -4,6 +4,8 @@ import { useStore } from '@/store/useStore';
 import { supabase } from '@/lib/supabase'; // 👈 استدعاء قاعدة البيانات
 import { CheckCircle, MapPin, CreditCard, ShoppingBag, ArrowRight, ArrowLeft, Loader2, Plus, Server, Truck, Smartphone, KeyRound, Mail, User as UserIcon } from 'lucide-react';
 import { triggerAutomation } from '@/lib/automations';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 // عنوان سيرفر Contabo الخاص بك
 const NOTIFICATION_API = 'http://167.86.73.97:8080/send';
@@ -18,8 +20,78 @@ export const Checkout = () => {
   const [orderId, setOrderId] = useState('');
   const [finalTotal, setFinalTotal] = useState(0); // 👈 متغير جديد لحفظ الإجمالي الحقيقي لصفحة الشكر
   
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState(user?.address || '');
+  const [isLocating, setIsLocating] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'tabby' | 'tamara'>('card');
+
+  // جلب العنوان المحفوظ فور تسجيل الدخول
+  useEffect(() => { if (user?.address) setAddress(user.address); }, [user]);
+
+  // 🌟 نظام تحديد الموقع الجغرافي (GPS) 🌟
+  const handleLocateMe = () => {
+    if (!navigator.geolocation) return alert(isRTL ? 'خدمة الموقع غير مدعومة في متصفحك' : 'Geolocation is not supported');
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&accept-language=${isRTL ? 'ar' : 'en'}`);
+        const data = await res.json();
+        setAddress(data.display_name || `${pos.coords.latitude}, ${pos.coords.longitude}`);
+      } catch (e) {
+        setAddress(`${pos.coords.latitude}, ${pos.coords.longitude}`);
+      }
+      setIsLocating(false);
+    }, () => {
+      alert(isRTL ? 'يرجى السماح بصلاحية الموقع من إعدادات المتصفح' : 'Please allow location permission');
+      setIsLocating(false);
+    });
+  };
+
+  // 🌟 نظام إصدار فاتورة PDF الأنيقة 🌟
+  const handlePrintInvoice = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    const invoiceHTML = `
+      <html dir="${isRTL ? 'rtl' : 'ltr'}">
+      <head>
+        <title>${isRTL ? 'فاتورة طلب' : 'Invoice'} #${orderId}</title>
+        <style>
+           body { font-family: 'Segoe UI', Tahoma, Arial; padding: 40px; color: #333; line-height: 1.6; }
+           .header { text-align: center; border-bottom: 2px solid #C5A059; padding-bottom: 20px; margin-bottom: 30px; }
+           .details { margin-bottom: 30px; background: #f9f9f9; padding: 20px; border-radius: 12px; }
+           table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+           th, td { padding: 12px; border: 1px solid #e0e0e0; text-align: ${isRTL ? 'right' : 'left'}; }
+           th { background-color: #2C2C2C; color: white; }
+           .total { font-size: 24px; font-weight: bold; color: #C5A059; text-align: ${isRTL ? 'left' : 'right'}; }
+           .policy { margin-top: 50px; font-size: 13px; color: #666; border-top: 1px dashed #ccc; padding-top: 20px; }
+        </style>
+      </head>
+      <body onload="window.print()">
+        <div class="header">
+          <h1 style="color: #C5A059; margin:0;">نسيج - NASEEJ</h1>
+          <h3 style="margin-5px 0 0 0; color: #666;">${isRTL ? 'فاتورة ضريبية مبسطة' : 'Tax Invoice'}</h3>
+        </div>
+        <div class="details">
+          <p><strong>${isRTL ? 'رقم الطلب:' : 'Order ID:'}</strong> #${orderId}</p>
+          <p><strong>${isRTL ? 'العميل:' : 'Customer:'}</strong> ${user?.full_name}</p>
+          <p><strong>${isRTL ? 'العنوان:' : 'Address:'}</strong> ${address}</p>
+        </div>
+        <table>
+           <thead><tr><th>${isRTL ? 'المنتج' : 'Product'}</th><th>${isRTL ? 'الكمية' : 'Qty'}</th><th>${isRTL ? 'السعر' : 'Price'}</th></tr></thead>
+           <tbody>
+             ${cart.map(item => `<tr><td>${isRTL ? item.title_ar : item.title_en}</td><td>${item.quantity}</td><td>${(item.discount_price || item.base_price) * (item.quantity || 1)} ${isRTL ? 'ر.س' : 'SAR'}</td></tr>`).join('')}
+           </tbody>
+        </table>
+        <div class="total">${isRTL ? 'الإجمالي:' : 'Total:'} ${finalTotal.toLocaleString()} ${isRTL ? 'ر.س' : 'SAR'}</div>
+        <div class="policy">
+          <strong>${isRTL ? 'سياسة الشحن والاسترجاع:' : 'Shipping & Return Policy:'}</strong><br/>
+          ${isRTL ? '- يتم تجهيز وشحن الطلبات خلال 3 إلى 5 أيام عمل.<br/>- الاسترجاع متاح خلال 14 يوماً من تاريخ الاستلام بشرط بقاء المنتج بحالته الأصلية ومغلفاً.<br/>- للمساعدة، تواصل معنا عبر واتساب.' : '- Orders are shipped within 3-5 business days.<br/>- Returns accepted within 14 days in original packaging.'}
+        </div>
+      </body>
+      </html>
+    `;
+    printWindow.document.write(invoiceHTML);
+    printWindow.document.close();
+  };
 
   // ==========================================
   // 🌟 نظام تسجيل الدخول المدمج الذكي (Unified OTP)
@@ -202,6 +274,59 @@ export const Checkout = () => {
   const total = subtotal + shipping;
   const installmentAmount = (total / 4).toFixed(2); 
 
+  // 🌟 دالة توليد الفاتورة كملف PDF (Base64) 🌟
+  const generateInvoicePDF = async (orderId: string, totalAmount: number) => {
+    const div = document.createElement('div');
+    div.innerHTML = `
+      <div style="padding: 40px; font-family: Tahoma, sans-serif; direction: ${isRTL ? 'rtl' : 'ltr'}; width: 800px; background: white; color: black;">
+        <h1 style="color: #C5A059; text-align: center; font-size: 32px; margin-bottom: 5px;">نسيج - NASEEJ</h1>
+        <h3 style="text-align: center; color: #666; margin-top: 0;">${isRTL ? 'فاتورة ضريبية مبسطة' : 'Tax Invoice'} #${orderId}</h3>
+        <hr style="border: 1px solid #C5A059; margin-bottom: 20px;" />
+        <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+          <div>
+            <p style="margin: 5px 0;"><strong>${isRTL ? 'العميل:' : 'Customer:'}</strong> ${user?.full_name}</p>
+            <p style="margin: 5px 0;"><strong>${isRTL ? 'العنوان:' : 'Address:'}</strong> ${address}</p>
+          </div>
+          <div style="text-align: ${isRTL ? 'left' : 'right'};">
+            <p style="margin: 5px 0;"><strong>${isRTL ? 'التاريخ:' : 'Date:'}</strong> ${new Date().toLocaleDateString(isRTL ? 'ar-SA' : 'en-US')}</p>
+          </div>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px; direction: ${isRTL ? 'rtl' : 'ltr'};">
+          <thead>
+            <tr style="background: #2C2C2C; color: white;">
+              <th style="padding: 12px; text-align: ${isRTL ? 'right' : 'left'}; border: 1px solid #ddd;">${isRTL ? 'المنتج' : 'Product'}</th>
+              <th style="padding: 12px; text-align: center; border: 1px solid #ddd;">${isRTL ? 'الكمية' : 'Qty'}</th>
+              <th style="padding: 12px; text-align: ${isRTL ? 'left' : 'right'}; border: 1px solid #ddd;">${isRTL ? 'السعر' : 'Price'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${cart.map(item => `
+              <tr>
+                <td style="padding: 12px; border: 1px solid #ddd;">${isRTL ? item.title_ar : item.title_en}</td>
+                <td style="padding: 12px; text-align: center; border: 1px solid #ddd;">${item.quantity}</td>
+                <td style="padding: 12px; text-align: ${isRTL ? 'left' : 'right'}; border: 1px solid #ddd;">${(item.discount_price || item.base_price) * (item.quantity || 1)} ${isRTL ? 'ر.س' : 'SAR'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <h2 style="text-align: ${isRTL ? 'left' : 'right'}; color: #C5A059; margin-top: 30px;">${isRTL ? 'الإجمالي:' : 'Total:'} ${totalAmount.toLocaleString()} ${isRTL ? 'ر.س' : 'SAR'}</h2>
+      </div>
+    `;
+    document.body.appendChild(div);
+    
+    // تحويل الـ HTML إلى صورة عالية الدقة ثم إلى PDF (لضمان دعم اللغة العربية 100%)
+    const canvas = await html2canvas(div, { scale: 2, useCORS: true });
+    document.body.removeChild(div);
+    
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+    
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    return pdf.output('datauristring'); // يرجع الملف بصيغة Base64 جاهز للإرسال
+  };
+
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!address) {
@@ -214,7 +339,28 @@ export const Checkout = () => {
     setOrderId(newOrderId);
 
     try {
-      // 🌟 تشغيل محرك الأوتوميشن الشامل 🌟
+      // 🌟 1. حفظ الطلب فعلياً في قاعدة البيانات 🌟
+      // تحديث عنوان العميل في حسابه إذا كان مختلفاً أو فارغاً ليتم حفظه للمرات القادمة
+      if (user && address !== user.address) {
+        await supabase.from('users').update({ address }).eq('id', user.id);
+        setUser({ ...user, address });
+      }
+
+      const { error: dbError } = await supabase.from('orders').insert([{
+        id: newOrderId,
+        user_id: user?.id || null,
+        customer_name: user?.full_name || (isRTL ? 'عميل نسيج' : 'Naseej Customer'),
+        customer_phone: user?.phone || '',
+        customer_email: user?.email || '',
+        shipping_address: address, // 👈 حفظ العنوان في الطلب
+        total: total,
+        status: 'pending'
+      }]);
+
+      // 🌟 توليد الفاتورة كملف PDF 🌟
+      const pdfBase64 = await generateInvoicePDF(newOrderId, total);
+
+      // 🌟 تشغيل محرك الأوتوميشن الشامل مع إرفاق الفاتورة 🌟
       await triggerAutomation({
         eventName: 'order_confirmed',
         brand: 'naseej',
@@ -227,8 +373,16 @@ export const Checkout = () => {
           customer_name: user?.full_name || (isRTL ? 'عميلنا العزيز' : 'Dear Customer'),
           order_id: newOrderId,
           total: total.toLocaleString()
+        },
+        attachment: {
+          name: `Naseej_Invoice_${newOrderId}.pdf`,
+          base64: pdfBase64
         }
       });
+
+      if (dbError) throw dbError;
+
+      // 🌟 2. تشغيل محرك الأوتوميشن الشامل (تأكيد الطلب) 🌟
 
       // إتمام العملية بنجاح
       setFinalTotal(total); // 👈 حفظ الإجمالي هنا قبل مسح السلة
@@ -267,9 +421,14 @@ export const Checkout = () => {
             {/* 👈 استخدام finalTotal هنا بدلاً من total */}
             <div className="flex justify-between items-center mt-2 border-t border-gray-200 pt-2"><span className="text-gray-500 text-sm">{isRTL ? 'الإجمالي:' : 'Total:'}</span><span className="font-bold text-[#2C2C2C]">{finalTotal.toLocaleString()} {isRTL ? 'ر.س' : 'SAR'}</span></div>
           </div>
-          <Link to="/shop" className="inline-flex items-center gap-2 bg-[#2C2C2C] text-white px-8 py-4 rounded-xl font-bold hover:bg-[#C5A059] transition-colors shadow-md">
-            <ShoppingBag size={20} /> {isRTL ? 'مواصلة التسوق' : 'Continue Shopping'}
-          </Link>
+          <div className="flex flex-col sm:flex-row justify-center gap-4">
+            <button onClick={handlePrintInvoice} className="inline-flex items-center justify-center gap-2 bg-white border-2 border-[#C5A059] text-[#C5A059] px-8 py-4 rounded-xl font-bold hover:bg-[#C5A059] hover:text-white transition-colors shadow-sm">
+              <MapPin size={20} /> {isRTL ? 'تحميل الفاتورة (PDF)' : 'Download Invoice'}
+            </button>
+            <Link to="/shop" className="inline-flex items-center justify-center gap-2 bg-[#2C2C2C] text-white px-8 py-4 rounded-xl font-bold hover:bg-black transition-colors shadow-md">
+              <ShoppingBag size={20} /> {isRTL ? 'مواصلة التسوق' : 'Continue Shopping'}
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -367,8 +526,13 @@ export const Checkout = () => {
                   <div><label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'معلومات التواصل' : 'Contact Info'}</label><input type="text" value={user.phone || user.email || ''} disabled dir="ltr" className="w-full p-4 border border-gray-200 rounded-xl bg-gray-50 text-gray-500 cursor-not-allowed text-end font-mono" /></div>
                 </div>
 
-                <h2 className="text-xl font-bold text-[#2C2C2C] mb-6 flex items-center gap-2 border-b border-gray-100 pb-4"><MapPin className="text-[#C5A059]" size={24}/> {isRTL ? 'عنوان التوصيل' : 'Shipping Address'}</h2>
-                <div className="mb-8"><textarea required value={address} onChange={(e) => setAddress(e.target.value)} placeholder={isRTL ? 'المدينة، الحي، اسم الشارع، رقم المبنى...' : 'City, District, Street name, Building no...'} rows={3} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-white resize-none"></textarea></div>
+                <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
+                  <h2 className="text-xl font-bold text-[#2C2C2C] flex items-center gap-2"><MapPin className="text-[#C5A059]" size={24}/> {isRTL ? 'عنوان التوصيل' : 'Shipping Address'}</h2>
+                  <button type="button" onClick={handleLocateMe} disabled={isLocating} className="flex items-center gap-2 text-sm font-bold bg-[#C5A059]/10 text-[#C5A059] px-4 py-2 rounded-lg hover:bg-[#C5A059] hover:text-white transition-colors disabled:opacity-50">
+                    {isLocating ? <Loader2 className="animate-spin" size={16}/> : <MapPin size={16}/>} {isRTL ? 'تحديد موقعي تلقائياً' : 'Locate Me'}
+                  </button>
+                </div>
+                <div className="mb-8"><textarea required value={address} onChange={(e) => setAddress(e.target.value)} placeholder={isRTL ? 'المدينة، الحي، اسم الشارع، رقم المبنى...' : 'City, District, Street name, Building no...'} rows={3} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-white resize-none leading-relaxed"></textarea></div>
 
                 <h2 className="text-xl font-bold text-[#2C2C2C] mb-6 flex items-center gap-2 border-b border-gray-100 pb-4"><CreditCard className="text-[#C5A059]" size={24}/> {isRTL ? 'طريقة الدفع' : 'Payment Method'}</h2>
                 <div className="space-y-4 mb-4">

@@ -21,9 +21,10 @@ interface TriggerProps {
     language?: 'ar' | 'en';
   };
   variables: Record<string, string>;
+  attachment?: { name: string, base64: string }; // 👈 إضافة هذا السطر
 }
 
-export const triggerAutomation = async ({ eventName, brand = 'naseej', userParams, variables }: TriggerProps) => {
+export const triggerAutomation = async ({ eventName, brand = 'naseej', userParams, variables, attachment }: TriggerProps) => {
   const isRTL = userParams.language !== 'en';
 
   try {
@@ -58,6 +59,11 @@ export const triggerAutomation = async ({ eventName, brand = 'naseej', userParam
       });
 
       const payload: any = { brand };
+      // 🌟 أضف هذا الجزء لدعم إرسال الملفات 🌟
+      if (attachment) {
+        payload.media_url = attachment.base64;
+        payload.file_name = attachment.name;
+      }
 
       if (template.channel === 'whatsapp' && userParams.phone) {
         payload.phone = formatPhone(userParams.phone);
@@ -74,6 +80,7 @@ export const triggerAutomation = async ({ eventName, brand = 'naseej', userParam
         return; // تجاوز إذا كانت وسيلة التواصل غير متوفرة لهذه القناة
       }
 
+      
       // إرسال الطلب للسيرفر
       return fetch(NOTIFICATION_API, {
         method: 'POST',

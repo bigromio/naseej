@@ -3,7 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from '@/store/useStore';
 import {
   Users, Package, Tag, Megaphone, ShoppingCart, BarChart3,
-  Settings, LogOut, Shield, Store, User as UserIcon, ChevronDown, Menu, X, Paintbrush, FileText
+  LogOut, Shield, Store, User as UserIcon, ChevronDown, Menu, X, Paintbrush, FileText
 } from 'lucide-react';
 import logo from '@/assets/logo.png';
 
@@ -24,19 +24,19 @@ export const AdminLayout = () => {
   const text = {
     ar: {
       commandCenter: 'مركز القيادة', backToStore: 'العودة للمتجر',
-      accountSettings: 'إعدادات الحساب', logout: 'تسجيل الخروج',
+      myDashboard: 'لوحة معلوماتي', logout: 'تسجيل الخروج', // <-- تم التعديل هنا
       nav: {
         team: 'الفريق والعملاء', products: 'إدارة المنتجات', offers: 'العروض والخصومات',
-        appearance: 'مظهر المتجر', // <-- أضف هذه
+        appearance: 'مظهر المتجر', 
         orders: 'الطلبات واللوجستيات', campaigns: 'الحملات التسويقية', analytics: 'التحليلات والأداء'
       }
     },
     en: {
       commandCenter: 'Command Center', backToStore: 'Back to Store',
-      accountSettings: 'Account Settings', logout: 'Logout',
+      myDashboard: 'My Dashboard', logout: 'Logout', // <-- تم التعديل هنا
       nav: {
         team: 'HR & CRM', products: 'Products Catalog', offers: 'Offers & Discounts',
-        appearance: 'Store Appearance', // <-- أضف هذه
+        appearance: 'Store Appearance', 
         orders: 'Orders & Logistics', campaigns: 'Marketing Campaigns', analytics: 'Analytics & Perf.'
       }
     }
@@ -49,8 +49,8 @@ export const AdminLayout = () => {
     { path: '/admin', icon: Users, label: t.nav.team },
     { path: '/admin/products', icon: Package, label: t.nav.products },
     { path: '/admin/offers', icon: Tag, label: t.nav.offers },
-    { path: '/admin/appearance', icon: Paintbrush, label: t.nav.appearance }, // <-- التبويب الجديد
-    { path: '/admin/pages', icon: FileText, label: language === 'ar' ? 'إدارة الصفحات' : 'Pages Management' }, // <-- التبويب الجديد
+    { path: '/admin/appearance', icon: Paintbrush, label: t.nav.appearance },
+    { path: '/admin/pages', icon: FileText, label: language === 'ar' ? 'إدارة الصفحات' : 'Pages Management' },
     { path: '/admin/orders', icon: ShoppingCart, label: t.nav.orders },
     { path: '/admin/campaigns', icon: Megaphone, label: t.nav.campaigns },
     { path: '/admin/analytics', icon: BarChart3, label: t.nav.analytics },
@@ -69,15 +69,15 @@ export const AdminLayout = () => {
 
       <aside className={`fixed h-full z-40 bg-[#2C2C2C] text-white flex flex-col transition-all duration-300 ease-in-out w-64 ${sidebarDesktopWidth} ${isRTL ? 'right-0' : 'left-0'} ${mobileTranslateClass} lg:translate-x-0`}>
         <div className={`h-20 border-b border-white/10 flex items-center justify-between lg:justify-center px-4`}>
+          <div className="flex lg:hidden items-center justify-between w-full">
+            <div className="bg-white/90 px-3 py-1.5 rounded-lg"><img src={logo} alt="Naseej" className="w-20 h-6 object-contain" /></div>
+            <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors"><X size={20} /></button>
+          </div>
           <button onClick={() => setIsDesktopCollapsed(!isDesktopCollapsed)} className={`hidden lg:flex items-center justify-center w-full focus:outline-none hover:bg-white/5 transition-all cursor-pointer py-2 rounded-xl`} title={isRTL ? 'طي / فتح' : 'Toggle'}>
             <div className="bg-white/90 px-3 py-2 rounded-xl">
               <img src={logo} alt="Naseej" className={`transition-all duration-300 object-contain ${isDesktopCollapsed ? 'w-8 h-8' : 'w-24 h-8'}`} />
             </div>
           </button>
-          <div className="flex lg:hidden items-center justify-between w-full">
-            <div className="bg-white/90 px-3 py-1.5 rounded-lg"><img src={logo} alt="Naseej" className="w-20 h-6 object-contain" /></div>
-            <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors"><X size={20} /></button>
-          </div>
         </div>
 
         <nav className="flex-1 py-6 px-3 space-y-2 overflow-x-hidden hide-scrollbar">
@@ -114,8 +114,13 @@ export const AdminLayout = () => {
               </button>
               {isProfileOpen && (
                 <div className={`absolute top-full mt-4 w-56 bg-white border border-gray-100 rounded-xl shadow-xl py-2 ${isRTL ? 'left-0' : 'right-0'} animate-in slide-in-from-top-2 duration-200`}>
-                  <Link to="/admin/account" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-50 hover:text-[#C5A059] border-b border-gray-50"><Settings size={18} /> {t.accountSettings}</Link>
-                  <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-600 hover:bg-red-50 text-right"><LogOut size={18} /> {t.logout}</button>
+                  {/* 🌟 تم تعديل الرابط والأيقونة هنا ليوجه إلى لوحة تحكم العميل 🌟 */}
+                  <Link to="/dashboard" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-50 hover:text-[#C5A059] border-b border-gray-50">
+                    <UserIcon size={18} /> {t.myDashboard}
+                  </Link>
+                  <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-600 hover:bg-red-50 text-right">
+                    <LogOut size={18} /> {t.logout}
+                  </button>
                 </div>
               )}
             </div>

@@ -524,17 +524,36 @@ return (
                           <option value="email">Email</option>
                         </select>
                         <span className="text-gray-300">|</span>
-                        {/* 🌟 اختيار نوع الحدث (المربوط بالمحرك الشامل) 🌟 */}
-                        <select 
-                          value={tpl.event_name} 
-                          onChange={e => { const newTpls = [...templates]; newTpls[index].event_name = e.target.value; setTemplates(newTpls); }}
-                          className="bg-transparent font-bold text-[#C5A059] outline-none cursor-pointer text-sm w-full"
-                        >
-                          <option value="" disabled>{isRTL ? 'اختر الإجراء...' : 'Select Event...'}</option>
-                          {Object.entries(SYSTEM_EVENTS).map(([key, val]) => (
-                            <option key={key} value={key}>{val}</option>
-                          ))}
-                        </select>
+                        {/* 🌟 اختيار نوع الحدث أو كتابته يدوياً 🌟 */}
+                        <div className="flex flex-col w-full">
+                          <select 
+                            value={Object.keys(SYSTEM_EVENTS).includes(tpl.event_name) ? tpl.event_name : 'custom_event'} 
+                            onChange={e => { 
+                              const newTpls = [...templates]; 
+                              newTpls[index].event_name = e.target.value === 'custom_event' ? '' : e.target.value; 
+                              setTemplates(newTpls); 
+                            }}
+                            className="bg-transparent font-bold text-[#C5A059] outline-none cursor-pointer text-sm w-full"
+                          >
+                            <option value="" disabled>{isRTL ? 'اختر الإجراء...' : 'Select Event...'}</option>
+                            {Object.entries(SYSTEM_EVENTS).map(([key, val]) => (
+                              <option key={key} value={key}>{val as string}</option>
+                            ))}
+                            <option value="custom_event">{isRTL ? '✍️ إجراء مخصص (كتابة يدوية)' : '✍️ Custom Event'}</option>
+                          </select>
+
+                          {/* حقل الكتابة يظهر فقط عند اختيار "إجراء مخصص" */}
+                          {(!Object.keys(SYSTEM_EVENTS).includes(tpl.event_name) || tpl.event_name === '') && (
+                            <input 
+                              type="text" 
+                              value={tpl.event_name} 
+                              onChange={e => { const newTpls = [...templates]; newTpls[index].event_name = e.target.value; setTemplates(newTpls); }}
+                              placeholder={isRTL ? 'اكتب الحدث البرمجي (مثال: order_shipped)' : 'Event name (e.g. order_shipped)'}
+                              className="mt-2 p-2 border border-gray-200 rounded-lg text-xs font-mono outline-none focus:border-[#C5A059] w-full bg-gray-50 shadow-inner text-gray-700"
+                              dir="ltr"
+                            />
+                          )}
+                        </div>
                       </div>
                     </div>
                     

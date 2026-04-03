@@ -27,9 +27,11 @@ export interface Page {
 export interface User {
   id: string;
   full_name: string;
-  email?: string;
+  email: string;
   phone: string;
-  role: 'customer' | 'owner' | 'manager' | 'employee';
+  role: 'owner' | 'manager' | 'employee' | 'customer';
+  address?: string; // 👈 إضافة هذا السطر لحل مشكلة النوع (Type)
+  created_at: string;
 }
 
 export interface Product {

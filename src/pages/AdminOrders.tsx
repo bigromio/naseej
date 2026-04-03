@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { supabase } from '@/lib/supabase';
 import { Loader2, Calendar, ShoppingBag, CheckCircle, XCircle, Clock, MessageCircle, Mail, AlertCircle, Phone } from 'lucide-react';
+import { triggerAutomation } from '@/lib/automations';
+
 export const AdminOrders = () => {
   const { language } = useStore();
   const isRTL = language === 'ar';
@@ -32,11 +34,63 @@ export const AdminOrders = () => {
     }
   };
 
-  useEffect(() => {
-    if (activeTab === 'appointments') {
-      fetchAppointments();
+  const [orders, setOrders] = useState<any[]>([]); // حالة الطلبات
+
+  // جلب الطلبات الحقيقية
+  const fetchOrders = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      setOrders(data || []);
+    } catch (error: any) {
+      console.error(error.message);
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'appointments') fetchAppointments();
+    if (activeTab === 'orders') fetchOrders();
   }, [activeTab]);
+
+  // تحديث حالة الطلب وإرسال إشعار الشحن
+  // 🌟 دالة تحديث حالة الطلب وإرسال كود التسليم السري 🌟
+  const updateOrderStatus = async (id: string, newStatus: string, order: any) => {
+    try {
+      let updatePayload: any = { status: newStatus };
+      let deliveryOtp = order.delivery_otp;
+
+      // إذا تم تغيير الحالة لـ "تم الشحن"، نولد كود تسليم إذا لم يكن موجوداً
+      if (newStatus === 'shipped' && !deliveryOtp) {
+        deliveryOtp = Math.floor(1000 + Math.random() * 9000).toString();
+        updatePayload.delivery_otp = deliveryOtp;
+      }
+
+      const { error } = await supabase.from('orders').update(updatePayload).eq('id', id);
+      if (error) throw error;
+      
+      setOrders(orders.map(o => o.id === id ? { ...o, ...updatePayload } : o));
+
+      if (newStatus === 'shipped') {
+        await triggerAutomation({
+          eventName: 'order_shipped',
+          brand: 'naseej',
+          userParams: { phone: order.customer_phone, email: order.customer_email, language: isRTL ? 'ar' : 'en' },
+          variables: { 
+            customer_name: order.customer_name, 
+            order_id: id, 
+            tracking_link: 'naseej.com/delivery-verify', // 👈 رابط صفحة المندوب
+            delivery_otp: deliveryOtp // 👈 هذا المتغير {{delivery_otp}} يجب وضعه في قالب "تم الشحن"
+          }
+        });
+        alert(isRTL ? '📦 تم التحديث لـ "تم الشحن" وإرسال كود التسليم السري للعميل!' : '📦 Status updated to Shipped and OTP sent!');
+      }
+    } catch (error: any) {
+      alert('حدث خطأ: ' + error.message);
+    }
+  };
 
   // تحديث حالة الحجز (قبول / إلغاء) مع محاكاة إرسال الإشعارات
   const updateAppointmentStatus = async (id: string, newStatus: string, customerName: string, customerPhone: string) => {
@@ -53,20 +107,23 @@ export const AdminOrders = () => {
       setAppointments(appointments.map(app => app.id === id ? { ...app, status: newStatus } : app));
 
       // 3. 🚀 نظام الإشعارات (المحاكاة لسيرفر Contabo المستقبلي)
-      if (newStatus === 'confirmed') {
-        alert(
-          `[محاكاة السيرفر - Contabo API]\n\n` +
-          `✅ تم تأكيد الحجز في قاعدة البيانات.\n` +
-          `📱 جاري إرسال رسالة WhatsApp للرقم: ${customerPhone}...\n` +
-          `📧 جاري إرسال Email للعميل: ${customerName}...\n\n` +
-          `(سيتم تفعيل الإرسال الفعلي لاحقاً عند ربط سيرفر الـ Node.js)`
-        );
+      // 3. 🚀 إطلاق الإشعارات الحقيقية 🌟
+      const app = appointments.find(a => a.id === id);
+      
+      if (newStatus === 'confirmed' && app) {
+        await triggerAutomation({
+          eventName: 'appointment_booked', // استخدم القالب المخصص لتأكيد المواعيد
+          brand: 'naseej',
+          userParams: { phone: customerPhone, language: isRTL ? 'ar' : 'en' },
+          variables: { 
+            customer_name: customerName, 
+            appointment_date: `${app.appointment_date} | ${formatTime(app.appointment_time)}`, 
+            service_type: app.service_type 
+          }
+        });
+        alert(isRTL ? '✅ تم تأكيد الموعد وإرسال الإشعار للعميل!' : '✅ Appointment confirmed and notification sent!');
       } else if (newStatus === 'cancelled') {
-        alert(
-          `[محاكاة السيرفر - Contabo API]\n\n` +
-          `❌ تم إلغاء الحجز وإتاحة الوقت من جديد.\n` +
-          `📱 جاري إرسال رسالة اعتذار عبر WhatsApp للرقم: ${customerPhone}...`
-        );
+        alert(isRTL ? '❌ تم إلغاء الموعد في النظام.' : '❌ Appointment cancelled.');
       }
 
     } catch (error: any) {
@@ -206,15 +263,59 @@ export const AdminOrders = () => {
         )}
 
         {/* ================================== */}
-        {/* تبويب طلبات المتجر (للمرحلة القادمة) */}
+        {/* تبويب طلبات المتجر */}
         {/* ================================== */}
         {activeTab === 'orders' && (
-          <div className="p-20 text-center flex flex-col items-center justify-center bg-gray-50/50">
-            <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center text-gray-400 mb-6 shadow-inner">
-              <ShoppingBag size={40} />
-            </div>
-            <h3 className="text-2xl font-bold text-[#2C2C2C] mb-2">طلبات المتجر (قريباً)</h3>
-            <p className="text-gray-500 max-w-md">سيتم تفعيل هذا القسم فور الانتهاء من برمجة (السلة العائمة ونظام الدفع Checkout) لتظهر طلبات العملاء هنا مباشرة.</p>
+          <div className="p-0">
+            {isLoading ? (
+              <div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#C5A059]" size={40} /></div>
+            ) : orders.length === 0 ? (
+              <div className="text-center py-20 text-gray-500">
+                <ShoppingBag size={48} className="mx-auto mb-4 opacity-50" />
+                <p className="text-lg font-bold">{isRTL ? 'لا توجد طلبات حالياً.' : 'No orders currently.'}</p>
+              </div>
+            ) : (
+              <table className="w-full text-start">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'رقم الطلب' : 'Order ID'}</th>
+                    <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'العميل' : 'Customer'}</th>
+                    <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'الإجمالي' : 'Total'}</th>
+                    <th className="p-4 text-center font-bold text-gray-600">{isRTL ? 'الحالة (تغيير)' : 'Status'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.map((order) => (
+                    <tr key={order.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                      <td className="p-4 font-bold text-[#2C2C2C]">#{order.id}</td>
+                      <td className="p-4">
+                        <div className="font-bold text-[#2C2C2C]">{order.customer_name}</div>
+                        <div className="text-sm text-gray-500 mt-1" dir="ltr">{order.customer_phone || order.customer_email}</div>
+                      </td>
+                      <td className="p-4 font-bold text-[#C5A059]">{order.total} {isRTL ? 'ر.س' : 'SAR'}</td>
+                      <td className="p-4 text-center">
+                        <select 
+                          value={order.status} 
+                          onChange={(e) => updateOrderStatus(order.id, e.target.value, order)}
+                          className={`px-3 py-2 rounded-xl text-xs font-bold outline-none cursor-pointer border ${
+                            order.status === 'pending' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                            order.status === 'shipped' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                            order.status === 'delivered' ? 'bg-green-50 text-green-700 border-green-200' :
+                            'bg-gray-50 text-gray-700 border-gray-200'
+                          }`}
+                        >
+                          <option value="pending">{isRTL ? 'قيد المراجعة' : 'Pending'}</option>
+                          <option value="processing">{isRTL ? 'جاري التجهيز' : 'Processing'}</option>
+                          <option value="shipped">{isRTL ? 'تم الشحن' : 'Shipped'}</option>
+                          <option value="delivered">{isRTL ? 'تم التوصيل' : 'Delivered'}</option>
+                          <option value="cancelled">{isRTL ? 'ملغي' : 'Cancelled'}</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 
