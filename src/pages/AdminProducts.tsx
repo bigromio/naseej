@@ -1,341 +1,369 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { supabase } from '@/lib/supabase';
-import Papa from 'papaparse';
-import { Search, Plus, Edit2, Trash2, Download, Upload, Loader2, X, Save, Image as ImageIcon, Star, Video, PlusCircle } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, Filter, Loader2, Save, X, DownloadCloud, Store, Package } from 'lucide-react';
+export interface Product {
+  id?: string;
+  name_ar: string;
+  name_en: string;
+  description_ar: string;
+  description_en: string;
+  price: number;
+  supply_price?: number;
+  stock: number;
+  category: string;
+  images: string[];
+  sku?: string;
+  supplier_id?: string;
+  available_cities?: string[];
+}
 
 export const AdminProducts = () => {
   const { language } = useStore();
   const isRTL = language === 'ar';
-
-  const [products, setProducts] = useState<any[]>([]);
-  const [collections, setCollections] = useState<any[]>([]);
+  
+  const [products, setProducts] = useState<Product[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]); // 🌟 الموردون الجدد
+  const [categories, setCategories] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
 
+  // 🌟 حالات نوافذ الإضافة والاستيراد
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formTab, setFormTab] = useState<'basic' | 'ar' | 'en'>('basic');
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [importSku, setImportSku] = useState('');
+  const [importSupplierId, setImportSupplierId] = useState('');
 
-  // تحديث النموذج ليشمل المعرض والفيديو
-  const [formData, setFormData] = useState({
-    id: '', sku: '', base_price: 0, image_lifestyle: '', gallery: [] as string[], video_url: '', collection_id: '', is_dynamic_size: false,
-    title_ar: '', category_ar: '', sub_category_ar: '', short_desc_ar: '', long_desc_ar: '',
-    title_en: '', category_en: '', sub_category_en: '', short_desc_en: '', long_desc_en: ''
+  const [currentProduct, setCurrentProduct] = useState<Partial<Product>>({
+    name_ar: '', name_en: '', description_ar: '', description_en: '',
+    price: 0, supply_price: 0, stock: 0, category: '', images: [], sku: '', supplier_id: ''
   });
-
-  const text = {
-    ar: {
-      title: 'إدارة المنتجات والكتالوج', search: 'ابحث برمز SKU أو اسم المنتج...',
-      addProduct: 'إضافة منتج', export: 'تصدير CSV', import: 'استيراد CSV',
-      sku: 'رمز المنتج (SKU)', name: 'الاسم', price: 'السعر الأساسي', category: 'القسم الرئيسي',
-      actions: 'إجراءات', success: 'تم الحفظ بنجاح!', confirmDelete: 'هل أنت متأكد من الحذف؟',
-      formBasic: 'البيانات الأساسية ومعرض الصور', formAr: 'التفاصيل (عربي)', formEn: 'التفاصيل (English)',
-      collection: 'مجموعة الارتباط (Cross-sell)', dynamicSize: 'منتج يباع بالمتر (ديناميكي)',
-      cancel: 'إلغاء', save: 'حفظ المنتج',
-      selectOrAddCat: 'اختر أو اكتب قسماً جديداً...', selectOrAddSub: 'اختر أو اكتب قسماً فرعياً...'
-    },
-    en: {
-      title: 'Products & Catalog Management', search: 'Search by SKU or Title...',
-      addProduct: 'Add Product', export: 'Export CSV', import: 'Import CSV',
-      sku: 'SKU (Auto)', name: 'Title', price: 'Base Price', category: 'Category',
-      actions: 'Actions', success: 'Saved successfully!', confirmDelete: 'Are you sure?',
-      formBasic: 'Basic Info & Media', formAr: 'Details (Arabic)', formEn: 'Details (English)',
-      collection: 'Related Collection (Cross-sell)', dynamicSize: 'Sold by Meter (Dynamic)',
-      cancel: 'Cancel', save: 'Save Product',
-      selectOrAddCat: 'Select or type new category...', selectOrAddSub: 'Select or type new sub-category...'
-    }
-  };
-  const t = text[language as keyof typeof text];
-
-  const uniqueCategoriesAr = Array.from(new Set(products.map(p => p.category_ar).filter(Boolean)));
-  const uniqueSubCategoriesAr = Array.from(new Set(products.map(p => p.sub_category_ar).filter(Boolean)));
-  const uniqueCategoriesEn = Array.from(new Set(products.map(p => p.category_en).filter(Boolean)));
-  const uniqueSubCategoriesEn = Array.from(new Set(products.map(p => p.sub_category_en).filter(Boolean)));
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
       const { data: prods } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-      const { data: cols } = await supabase.from('collections').select('*');
       if (prods) setProducts(prods);
-      if (cols) setCollections(cols);
-    } catch (error) { console.error(error); }
-    finally { setIsLoading(false); }
+
+      const { data: sups } = await supabase.from('suppliers').select('id, name, type').eq('status', 'approved');
+      if (sups) setSuppliers(sups);
+
+      const { data: cats } = await supabase.from('categories').select('name_ar');
+      if (cats) setCategories(cats.map(c => c.name_ar));
+
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-  // دالة توليد الـ SKU التلقائي
-  const generateNextSku = () => {
-    const prefix = 'NSJ-';
-    let maxNum = 1000; // البداية من 1000
-    products.forEach(p => {
-      if (p.sku && p.sku.startsWith(prefix)) {
-        const num = parseInt(p.sku.replace(prefix, ''), 10);
-        if (!isNaN(num) && num > maxNum) maxNum = num;
+  // ==========================================
+  // 🌟 محرك استيراد الدروبشيبينج (API Call)
+  // ==========================================
+  const handleImportProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importSku || !importSupplierId) return alert(isRTL ? 'يرجى إدخال رقم المنتج واختيار المورد' : 'SKU and Supplier are required');
+    
+    setIsSaving(true);
+    try {
+      // 1. الاتصال بسيرفر كونتابو الخاص بك لجلب بيانات CJ
+      const response = await fetch('http://167.86.73.97:8080/api/supplier/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: importSku, supplier_id: importSupplierId })
+      });
+
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || 'فشل الاستيراد من المورد');
       }
-    });
-    return `${prefix}${maxNum + 1}`;
-  };
 
-  const openAddModal = () => {
-    setModalMode('add');
-    const autoSku = generateNextSku(); // توليد الرمز
-    setFormData({ 
-      id: '', sku: autoSku, base_price: 0, image_lifestyle: '', gallery: [], video_url: '', collection_id: '', is_dynamic_size: false, 
-      title_ar: '', category_ar: '', sub_category_ar: '', short_desc_ar: '', long_desc_ar: '', 
-      title_en: '', category_en: '', sub_category_en: '', short_desc_en: '', long_desc_en: '' 
-    });
-    setFormTab('basic'); setIsModalOpen(true);
-  };
-
-  const openEditModal = (product: any) => {
-    setModalMode('edit'); 
-    // التأكد من أن المعرض عبارة عن مصفوفة (لمنع الأخطاء مع المنتجات القديمة)
-    setFormData({ ...product, gallery: product.gallery || [], video_url: product.video_url || '' }); 
-    setFormTab('basic'); setIsModalOpen(true);
-  };
-
-  // دوال إدارة معرض الصور (Gallery)
-  const handleAddGalleryImage = () => {
-    setFormData({ ...formData, gallery: [...formData.gallery, ''] });
-  };
-  const handleGalleryChange = (index: number, value: string) => {
-    const newGallery = [...formData.gallery];
-    newGallery[index] = value;
-    setFormData({ ...formData, gallery: newGallery });
-  };
-  const handleRemoveGalleryImage = (index: number) => {
-    const newGallery = formData.gallery.filter((_, i) => i !== index);
-    setFormData({ ...formData, gallery: newGallery });
+      // 2. وضع البيانات القادمة في النافذة ليقوم الأدمن بمراجعتها وتسعيرها
+      setCurrentProduct({
+        ...data.product,
+        category: categories.length > 0 ? categories[0] : 'أثاث'
+      });
+      
+      setIsImportModalOpen(false); // إغلاق نافذة الاستيراد
+      setIsModalOpen(true); // فتح نافذة إضافة المنتج للمراجعة النهائية
+      setImportSku('');
+      
+    } catch (error: any) {
+      alert(error.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSaveProduct = async (e: React.FormEvent) => {
-    e.preventDefault(); setIsSubmitting(true);
+    e.preventDefault();
+    setIsSaving(true);
     try {
-      const payload = { ...formData };
-      if (payload.collection_id === '') payload.collection_id = null as any; 
-      // تنظيف الروابط الفارغة من المعرض قبل الحفظ
-      payload.gallery = payload.gallery.filter(url => url.trim() !== '');
-
-      if (modalMode === 'add') {
-        delete (payload as any).id; 
-        const { error } = await supabase.from('products').insert([payload]);
-        if (error) throw error;
+      if (currentProduct.id) {
+        await supabase.from('products').update(currentProduct).eq('id', currentProduct.id);
       } else {
-        const { error } = await supabase.from('products').update(payload).eq('id', formData.id);
-        if (error) throw error;
+        await supabase.from('products').insert([currentProduct]);
       }
-      setIsModalOpen(false); fetchData();
-    } catch (error: any) { alert(error.message); }
-    finally { setIsSubmitting(false); }
+      await fetchData();
+      setIsModalOpen(false);
+    } catch (error) {
+      alert(isRTL ? 'خطأ في الحفظ' : 'Error saving');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm(t.confirmDelete)) return;
-    try { await supabase.from('products').delete().eq('id', id); fetchData(); } 
-    catch (error: any) { alert(error.message); }
+  const handleDeleteProduct = async (id: string) => {
+    if (!window.confirm(isRTL ? 'هل أنت متأكد من الحذف؟' : 'Are you sure?')) return;
+    try {
+      await supabase.from('products').delete().eq('id', id);
+      setProducts(products.filter(p => p.id !== id));
+    } catch (error) {
+      alert(isRTL ? 'خطأ في الحذف' : 'Error deleting');
+    }
   };
 
-  const handleExportCSV = () => {
-    // نقوم بتحويل مصفوفة المعرض لنص مفصول بفواصل لكي يقبله الإكسيل
-    const exportData = products.map(p => ({ ...p, gallery: p.gallery?.join(' | ') || '' }));
-    const csv = '\ufeff' + Papa.unparse(exportData);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url;
-    link.setAttribute('download', `naseej_products_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-  };
-
-  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    setIsLoading(true);
-    Papa.parse(file, { header: true, skipEmptyLines: true, complete: async (results) => {
-        try {
-          // إعادة تحويل النص إلى مصفوفة صور عند الاستيراد
-          const formattedData = results.data.map((row: any) => ({
-             ...row, 
-             gallery: row.gallery ? row.gallery.split(' | ').filter(Boolean) : [] 
-          }));
-          const { error } = await supabase.from('products').upsert(formattedData);
-          if (error) throw error; alert(t.success); fetchData();
-        } catch (error: any) { alert('Error: ' + error.message); setIsLoading(false); }
-      }
-    });
-  };
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = (product.name_ar?.toLowerCase() || '').includes(searchQuery.toLowerCase()) || 
+                          (product.name_en?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+                          (product.sku?.toLowerCase() || '').includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || product.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
 
   return (
-    <div className="space-y-6 relative">
-      <div className="flex flex-col lg:flex-row justify-between items-center gap-4 mb-8">
-        <h2 className="text-2xl font-bold text-[#2C2C2C]">{t.title}</h2>
-        <div className="flex flex-wrap gap-3">
-          <button onClick={handleExportCSV} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl flex items-center gap-2 hover:bg-gray-50 shadow-sm"><Download size={18} /> {t.export}</button>
-          <label className="px-4 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl flex items-center gap-2 hover:bg-gray-50 shadow-sm cursor-pointer"><Upload size={18} /> {t.import}<input type="file" accept=".csv" className="hidden" onChange={handleImportCSV} /></label>
-          <button onClick={openAddModal} className="px-6 py-2 bg-[#C5A059] text-white font-bold rounded-xl flex items-center gap-2 hover:bg-[#b08d4b] shadow-lg shadow-[#C5A059]/20"><Plus size={20} /> {t.addProduct}</button>
+    <div className="space-y-6 max-w-7xl mx-auto pb-20">
+      
+      {/* 🌟 رأس الصفحة وأزرار الإضافة والاستيراد 🌟 */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+        <div>
+          <h2 className="text-2xl font-bold text-[#2C2C2C] mb-2 flex items-center gap-2">
+            <Package className="text-[#C5A059]" /> {isRTL ? 'إدارة المنتجات والمخزون' : 'Products & Inventory'}
+          </h2>
+          <p className="text-gray-500 text-sm">
+            {isRTL ? 'أضف منتجاتك يدوياً أو استوردها آلياً بضغطة زر من موردي الدروبشيبينج.' : 'Add manually or import automatically from dropshipping suppliers.'}
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          <button 
+            onClick={() => setIsImportModalOpen(true)}
+            className="bg-blue-50 text-blue-600 border border-blue-200 px-6 py-3 rounded-xl font-bold hover:bg-blue-600 hover:text-white transition-colors flex items-center justify-center gap-2 shadow-sm"
+          >
+            <DownloadCloud size={20}/> {isRTL ? 'استيراد دروبشيبينج ☁️' : 'Import Dropshipping ☁️'}
+          </button>
+          <button 
+            onClick={() => {
+              setCurrentProduct({ name_ar: '', name_en: '', description_ar: '', description_en: '', price: 0, supply_price: 0, stock: 0, category: '', images: [], sku: '', supplier_id: '' });
+              setIsModalOpen(true);
+            }}
+            className="bg-[#2C2C2C] text-white px-6 py-3 rounded-xl font-bold hover:bg-[#C5A059] transition-colors flex items-center justify-center gap-2 shadow-md"
+          >
+            <Plus size={20}/> {isRTL ? 'إضافة منتج يدوي' : 'Add Manual Product'}
+          </button>
         </div>
       </div>
 
-      <div className="relative w-full lg:w-1/3 mb-6">
-        <Search className={`absolute top-3 ${isRTL ? 'right-3' : 'left-3'} text-gray-400`} size={20} />
-        <input type="text" placeholder={t.search} className={`w-full p-3 ${isRTL ? 'pr-10' : 'pl-10'} border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-white shadow-sm`} />
+      {/* 🌟 شريط البحث والفلترة 🌟 */}
+      <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+        <div className="relative flex-1">
+          <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+          <input 
+            type="text" 
+            placeholder={isRTL ? 'ابحث بالاسم، أو برقم المنتج (SKU)...' : 'Search by name or SKU...'}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-4 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-[#C5A059] font-bold"
+          />
+        </div>
+        <div className="flex items-center gap-2 min-w-[200px]">
+          <Filter className="text-gray-400" size={20} />
+          <select 
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 p-3 rounded-xl focus:outline-none focus:border-[#C5A059] font-bold cursor-pointer"
+          >
+            <option value="all">{isRTL ? 'جميع الأقسام' : 'All Categories'}</option>
+            {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+          </select>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-20"><Loader2 className="animate-spin text-[#C5A059]" size={40} /></div>
-      ) : (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
-          <table className="w-full text-right min-w-[1000px]">
-            <thead className="bg-gray-50 text-gray-500 text-sm border-b border-gray-100">
-              <tr>
-                <th className="p-4 w-16"></th><th className="p-4 font-bold">{t.sku}</th><th className="p-4 font-bold">{t.name}</th><th className="p-4 font-bold">{t.category}</th><th className="p-4 font-bold">{t.price}</th><th className="p-4 font-bold text-center">التقييمات</th><th className="p-4 font-bold text-center">{t.actions}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50 text-sm">
-              {products.map(product => (
-                <tr key={product.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="p-4"><div className="w-12 h-12 rounded-lg bg-gray-100 overflow-hidden border border-gray-200 relative">
-                    <img src={product.image_lifestyle || 'https://via.placeholder.com/150'} alt="product" className="w-full h-full object-cover" />
-                    {product.gallery?.length > 0 && <span className="absolute bottom-0 right-0 bg-black/60 text-white text-[9px] px-1 rounded-tl">+</span>}
-                  </div></td>
-                  <td className="p-4 font-bold text-gray-500">{product.sku}</td>
-                  <td className="p-4 font-bold text-[#2C2C2C]">{isRTL ? product.title_ar : product.title_en}</td>
-                  <td className="p-4"><span className="bg-gray-100 px-2 py-1 rounded text-xs font-bold text-gray-600">{isRTL ? product.category_ar : product.category_en}</span></td>
-                  <td className="p-4 font-bold text-[#C5A059]">{product.base_price} {isRTL ? 'ر.س' : 'SAR'}</td>
-                  <td className="p-4 text-center"><div className="flex items-center justify-center gap-1 text-yellow-500 font-bold"><Star size={14} fill="currentColor"/> 5.0</div></td>
-                  <td className="p-4 flex justify-center gap-2 items-center h-full pt-6">
-                    <button onClick={() => openEditModal(product)} className="p-2 text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors"><Edit2 size={18}/></button>
-                    <button onClick={() => handleDelete(product.id)} className="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg"><Trash2 size={18}/></button>
-                  </td>
+      {/* 🌟 جدول المنتجات 🌟 */}
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden animate-in fade-in">
+        {isLoading ? (
+          <div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#C5A059]" size={40} /></div>
+        ) : filteredProducts.length === 0 ? (
+          <div className="text-center py-20 text-gray-500">
+            <Package size={48} className="mx-auto mb-4 opacity-50" />
+            <p className="text-lg font-bold">{isRTL ? 'لا توجد منتجات مطابقة للبحث.' : 'No products found.'}</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-start whitespace-nowrap">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'المنتج' : 'Product'}</th>
+                  <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'المورد (التكلفة)' : 'Supplier (Cost)'}</th>
+                  <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'سعر البيع' : 'Sale Price'}</th>
+                  <th className="p-4 text-center font-bold text-gray-600">{isRTL ? 'المخزون' : 'Stock'}</th>
+                  <th className="p-4 text-center font-bold text-gray-600">{isRTL ? 'إجراءات' : 'Actions'}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredProducts.map((product) => (
+                  <tr key={product.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                    <td className="p-4">
+                      <div className="flex items-center gap-4">
+                        <img src={product.images?.[0] || 'https://via.placeholder.com/50'} alt={product.name_ar} className="w-12 h-12 rounded-lg object-cover border border-gray-100" />
+                        <div>
+                          <div className="font-bold text-[#2C2C2C] max-w-[200px] truncate">{isRTL ? product.name_ar : product.name_en}</div>
+                          <div className="text-xs text-gray-500 font-mono mt-1">SKU: {product.sku || 'N/A'}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-2">
+                        <Store size={16} className="text-gray-400" />
+                        <span className="font-bold text-gray-700 text-sm">
+                          {suppliers.find(s => s.id === product.supplier_id)?.name || (isRTL ? 'منتج داخلي' : 'In-house')}
+                        </span>
+                      </div>
+                      <div className="text-xs font-bold text-red-500 mt-1">
+                        {isRTL ? 'التكلفة: ' : 'Cost: '} {product.supply_price || 0} {isRTL ? 'ر.س' : 'SAR'}
+                      </div>
+                    </td>
+                    <td className="p-4 font-bold text-green-600">
+                      {product.price} {isRTL ? 'ر.س' : 'SAR'}
+                    </td>
+                    <td className="p-4 text-center">
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${product.stock > 10 ? 'bg-green-100 text-green-700' : product.stock > 0 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                        {product.stock} {isRTL ? 'قطعة' : 'pcs'}
+                      </span>
+                    </td>
+                    <td className="p-4 text-center">
+                      <div className="flex justify-center items-center gap-2">
+                        <button onClick={() => { setCurrentProduct(product); setIsModalOpen(true); }} className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white rounded-lg transition-colors">
+                          <Edit2 size={18}/>
+                        </button>
+                        <button onClick={() => handleDeleteProduct(product.id)} className="p-2 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white rounded-lg transition-colors">
+                          <Trash2 size={18}/>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ================================== */}
+      {/* 🌟 1. نافذة الاستيراد من الدروبشيبينج 🌟 */}
+      {/* ================================== */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="bg-blue-600 p-6 text-white flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2"><DownloadCloud size={24}/> {isRTL ? 'استيراد منتج دولي' : 'Import Product'}</h2>
+                <p className="text-blue-100 text-sm mt-1">{isRTL ? 'جلب بيانات المنتج من المورد آلياً' : 'Fetch product data automatically'}</p>
+              </div>
+              <button onClick={() => setIsImportModalOpen(false)} className="text-white/70 hover:text-white"><X size={24}/></button>
+            </div>
+            
+            <form onSubmit={handleImportProduct} className="p-6 space-y-6">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'رقم المنتج (SKU) لدى المورد' : 'Supplier SKU'}</label>
+                <input type="text" required value={importSku} onChange={e => setImportSku(e.target.value)} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-blue-500 bg-gray-50 font-mono text-center text-lg tracking-widest" placeholder="مثال: CJ12345678" dir="ltr" />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'اختر المورد الدولي' : 'Select Dropshipping Supplier'}</label>
+                <select required value={importSupplierId} onChange={e => setImportSupplierId(e.target.value)} className="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-blue-500 bg-gray-50 font-bold cursor-pointer">
+                  <option value="" disabled>{isRTL ? 'اختر...' : 'Select...'}</option>
+                  {suppliers.filter(s => s.type === 'international').map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <button type="submit" disabled={isSaving} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-70 flex justify-center items-center gap-2">
+                {isSaving ? <Loader2 size={20} className="animate-spin" /> : (isRTL ? 'استيراد الآن' : 'Import Now')}
+              </button>
+            </form>
+          </div>
         </div>
       )}
 
+      {/* ================================== */}
+      {/* 🌟 2. نافذة إضافة/تعديل المنتج اليدوية والمراجعة 🌟 */}
+      {/* ================================== */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gray-50">
-              <h3 className="font-bold text-xl text-[#2C2C2C]">{modalMode === 'add' ? t.addProduct : (isRTL ? formData.title_ar : formData.title_en)}</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-4xl my-8 overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="bg-[#2C2C2C] p-6 text-white flex justify-between items-center sticky top-0 z-10">
+              <h2 className="text-xl font-bold">{currentProduct.id ? (isRTL ? 'تعديل المنتج' : 'Edit Product') : (isRTL ? 'إضافة منتج جديد' : 'Add New Product')}</h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white"><X size={24}/></button>
             </div>
-
-            <div className="flex border-b border-gray-200 bg-gray-50/50 px-6 pt-2 gap-4">
-              <button onClick={() => setFormTab('basic')} className={`pb-3 font-bold border-b-2 transition-colors ${formTab === 'basic' ? 'border-[#C5A059] text-[#C5A059]' : 'border-transparent text-gray-500'}`}>{t.formBasic}</button>
-              <button onClick={() => setFormTab('ar')} className={`pb-3 font-bold border-b-2 transition-colors ${formTab === 'ar' ? 'border-[#C5A059] text-[#C5A059]' : 'border-transparent text-gray-500'}`}>{t.formAr}</button>
-              <button onClick={() => setFormTab('en')} className={`pb-3 font-bold border-b-2 transition-colors ${formTab === 'en' ? 'border-[#C5A059] text-[#C5A059]' : 'border-transparent text-gray-500'}`}>{t.formEn}</button>
-            </div>
-
-            <form onSubmit={handleSaveProduct} className="flex-1 overflow-y-auto p-6">
+            
+            <form onSubmit={handleSaveProduct} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
               
-              {/* التبويب الأساسي والصور */}
-              {formTab === 'basic' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* قفلنا حقل الـ SKU وجعلناه غير قابل للتعديل عند الإضافة ليتم الحفاظ على التسلسل */}
-                  <div><label className="block text-sm font-bold mb-2">{t.sku} (تلقائي)</label><input required type="text" value={formData.sku} disabled={modalMode === 'add'} onChange={e => setFormData({...formData, sku: e.target.value})} className="w-full p-3 border rounded-xl outline-none bg-gray-100 text-gray-500 cursor-not-allowed font-bold" /></div>
-                  <div><label className="block text-sm font-bold mb-2">{t.price}</label><input required type="number" step="0.01" value={formData.base_price} onChange={e => setFormData({...formData, base_price: parseFloat(e.target.value)})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059]" /></div>
-                  
-                  {/* الصورة الرئيسية */}
-                  <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">رابط الصورة الرئيسية للمنتج</label>
-                    <div className="flex gap-2">
-                      <div className="flex-1 relative"><ImageIcon className={`absolute top-3 ${isRTL ? 'right-3' : 'left-3'} text-gray-400`} size={20}/><input type="url" value={formData.image_lifestyle} onChange={e => setFormData({...formData, image_lifestyle: e.target.value})} className={`w-full p-3 ${isRTL ? 'pr-10' : 'pl-10'} border rounded-xl outline-none focus:border-[#C5A059]`} dir="ltr" placeholder="https://..." /></div>
-                      {formData.image_lifestyle && <img src={formData.image_lifestyle} alt="preview" className="w-12 h-12 rounded-lg object-cover border" />}
-                    </div>
-                  </div>
-
-                  {/* معرض الصور المتعددة */}
-                  <div className="md:col-span-2 border border-gray-200 p-4 rounded-xl bg-gray-50">
-                    <div className="flex justify-between items-center mb-4">
-                      <label className="block text-sm font-bold">معرض الصور الإضافية (Gallery)</label>
-                      <button type="button" onClick={handleAddGalleryImage} className="text-sm text-[#C5A059] font-bold flex items-center gap-1 hover:underline"><PlusCircle size={16}/> إضافة صورة</button>
-                    </div>
-                    {formData.gallery.length === 0 && <p className="text-xs text-gray-400">لم يتم إضافة صور إضافية بعد.</p>}
-                    <div className="space-y-2">
-                      {formData.gallery.map((url, idx) => (
-                        <div key={idx} className="flex gap-2">
-                          <input type="url" value={url} onChange={e => handleGalleryChange(idx, e.target.value)} className="flex-1 p-2 border rounded-lg outline-none focus:border-[#C5A059] text-sm" dir="ltr" placeholder="https://..." />
-                          {url && <img src={url} alt="g-preview" className="w-10 h-10 rounded object-cover border" />}
-                          <button type="button" onClick={() => handleRemoveGalleryImage(idx)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={18}/></button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* رابط الفيديو */}
-                  <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">رابط فيديو استعراضي (اختياري)</label>
-                    <div className="relative">
-                      <Video className={`absolute top-3 ${isRTL ? 'right-3' : 'left-3'} text-gray-400`} size={20}/>
-                      <input type="url" value={formData.video_url} onChange={e => setFormData({...formData, video_url: e.target.value})} className={`w-full p-3 ${isRTL ? 'pr-10' : 'pl-10'} border rounded-xl outline-none focus:border-[#C5A059]`} dir="ltr" placeholder="مثال: رابط يوتيوب أو فيديو MP4" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold mb-2 text-[#C5A059]">{t.collection}</label>
-                    <select value={formData.collection_id || ''} onChange={e => setFormData({...formData, collection_id: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059] bg-white">
-                      <option value="">-- مستقل (بدون مجموعة) --</option>
-                      {collections.map(col => (<option key={col.id} value={col.id}>{isRTL ? col.name_ar : col.name_en}</option>))}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-3 bg-white p-4 rounded-xl border border-gray-200 mt-7">
-                    <input type="checkbox" id="dynamicSize" checked={formData.is_dynamic_size} onChange={e => setFormData({...formData, is_dynamic_size: e.target.checked})} className="w-5 h-5 accent-[#C5A059] rounded" />
-                    <label htmlFor="dynamicSize" className="font-bold text-[#2C2C2C] cursor-pointer">{t.dynamicSize}</label>
-                  </div>
+              {/* قسم المورد والتكلفة (أهم قسم مالي) */}
+              <div className="md:col-span-2 bg-yellow-50 p-6 rounded-2xl border border-yellow-200 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-yellow-800 mb-2">{isRTL ? 'ارتباط المورد' : 'Supplier Link'}</label>
+                  <select value={currentProduct.supplier_id || ''} onChange={e => setCurrentProduct({...currentProduct, supplier_id: e.target.value})} className="w-full p-3 border border-yellow-300 rounded-xl outline-none focus:border-yellow-500 bg-white font-bold cursor-pointer">
+                    <option value="">{isRTL ? 'منتج داخلي (لا يوجد مورد)' : 'In-house (No Supplier)'}</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.type === 'local' ? 'محلي' : 'دولي'})</option>)}
+                  </select>
                 </div>
-              )}
-
-              {/* التبويب العربي */}
-              {formTab === 'ar' && (
-                <div className="space-y-4" dir="rtl">
-                  <div><label className="block text-sm font-bold mb-2">اسم المنتج</label><input required type="text" value={formData.title_ar} onChange={e => setFormData({...formData, title_ar: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059]" /></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-bold mb-2 text-[#C5A059]">القسم الرئيسي</label>
-                      <input required list="cat-ar-list" value={formData.category_ar} onChange={e => setFormData({...formData, category_ar: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 focus:bg-white transition-colors" placeholder={text.ar.selectOrAddCat} />
-                      <datalist id="cat-ar-list">{uniqueCategoriesAr.map(c => <option key={c as string} value={c as string} />)}</datalist>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold mb-2 text-[#C5A059]">القسم الفرعي</label>
-                      <input required list="sub-ar-list" value={formData.sub_category_ar} onChange={e => setFormData({...formData, sub_category_ar: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 focus:bg-white transition-colors" placeholder={text.ar.selectOrAddSub} />
-                      <datalist id="sub-ar-list">{uniqueSubCategoriesAr.map(c => <option key={c as string} value={c as string} />)}</datalist>
-                    </div>
-                  </div>
-                  <div><label className="block text-sm font-bold mb-2">الوصف القصير</label><textarea required rows={2} value={formData.short_desc_ar} onChange={e => setFormData({...formData, short_desc_ar: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059]" /></div>
-                  <div><label className="block text-sm font-bold mb-2">الوصف الشامل والتفاصيل</label><textarea required rows={5} value={formData.long_desc_ar} onChange={e => setFormData({...formData, long_desc_ar: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059]" /></div>
+                <div>
+                  <label className="block text-sm font-bold text-yellow-800 mb-2">{isRTL ? 'رقم المنتج (SKU)' : 'Product SKU'}</label>
+                  <input type="text" value={currentProduct.sku || ''} onChange={e => setCurrentProduct({...currentProduct, sku: e.target.value})} className="w-full p-3 border border-yellow-300 rounded-xl outline-none focus:border-yellow-500 bg-white font-mono" dir="ltr" placeholder="NSJ-001" />
                 </div>
-              )}
-
-              {/* التبويب الإنجليزي */}
-              {formTab === 'en' && (
-                <div className="space-y-4" dir="ltr">
-                  <div><label className="block text-sm font-bold mb-2">Product Title</label><input required type="text" value={formData.title_en} onChange={e => setFormData({...formData, title_en: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059]" /></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-bold mb-2 text-[#C5A059]">Main Category</label>
-                      <input required list="cat-en-list" value={formData.category_en} onChange={e => setFormData({...formData, category_en: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 focus:bg-white transition-colors" placeholder={text.en.selectOrAddCat} />
-                      <datalist id="cat-en-list">{uniqueCategoriesEn.map(c => <option key={c as string} value={c as string} />)}</datalist>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold mb-2 text-[#C5A059]">Sub Category</label>
-                      <input required list="sub-en-list" value={formData.sub_category_en} onChange={e => setFormData({...formData, sub_category_en: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059] bg-gray-50 focus:bg-white transition-colors" placeholder={text.en.selectOrAddSub} />
-                      <datalist id="sub-en-list">{uniqueSubCategoriesEn.map(c => <option key={c as string} value={c as string} />)}</datalist>
-                    </div>
-                  </div>
-                  <div><label className="block text-sm font-bold mb-2">Short Description</label><textarea required rows={2} value={formData.short_desc_en} onChange={e => setFormData({...formData, short_desc_en: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059]" /></div>
-                  <div><label className="block text-sm font-bold mb-2">Long Details & Description</label><textarea required rows={5} value={formData.long_desc_en} onChange={e => setFormData({...formData, long_desc_en: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-[#C5A059]" /></div>
+                <div>
+                  <label className="block text-sm font-bold text-red-600 mb-2">{isRTL ? 'سعر التكلفة (للمورد) ر.س' : 'Supply Cost SAR'}</label>
+                  <input type="number" required value={currentProduct.supply_price || 0} onChange={e => setCurrentProduct({...currentProduct, supply_price: parseFloat(e.target.value)})} className="w-full p-3 border border-red-300 rounded-xl outline-none focus:border-red-500 bg-white font-bold text-red-600" dir="ltr" />
                 </div>
-              )}
+              </div>
 
+              {/* البيانات الأساسية */}
+              <div><label className="block text-sm font-bold text-gray-700 mb-2">اسم المنتج (عربي)</label><input type="text" required value={currentProduct.name_ar} onChange={e => setCurrentProduct({...currentProduct, name_ar: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059]" dir="rtl" /></div>
+              <div><label className="block text-sm font-bold text-gray-700 mb-2">Product Name (English)</label><input type="text" required value={currentProduct.name_en} onChange={e => setCurrentProduct({...currentProduct, name_en: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059]" dir="ltr" /></div>
+              
+              <div><label className="block text-sm font-bold text-green-600 mb-2">{isRTL ? 'سعر البيع (للعميل) ر.س' : 'Sale Price SAR'}</label><input type="number" required value={currentProduct.price || 0} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full p-3 border border-green-300 rounded-xl outline-none focus:border-green-500 font-bold text-green-600 bg-green-50" dir="ltr" /></div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'القسم' : 'Category'}</label>
+                <select required value={currentProduct.category} onChange={e => setCurrentProduct({...currentProduct, category: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] bg-white cursor-pointer">
+                  <option value="" disabled>{isRTL ? 'اختر القسم...' : 'Select Category...'}</option>
+                  {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                </select>
+              </div>
+
+              <div><label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'الكمية المتوفرة' : 'Stock Quantity'}</label><input type="number" required value={currentProduct.stock || 0} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059]" dir="ltr" /></div>
+              <div><label className="block text-sm font-bold text-gray-700 mb-2">{isRTL ? 'روابط الصور (مفصولة بفاصلة , )' : 'Image URLs (comma separated)'}</label><textarea rows={2} value={(currentProduct.images || []).join(', ')} onChange={e => setCurrentProduct({...currentProduct, images: e.target.value.split(',').map(u => u.trim()).filter(u => u)})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059] font-mono text-sm" dir="ltr" /></div>
+
+              <div className="md:col-span-2"><label className="block text-sm font-bold text-gray-700 mb-2">الوصف (عربي)</label><textarea rows={4} required value={currentProduct.description_ar} onChange={e => setCurrentProduct({...currentProduct, description_ar: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059]" dir="rtl" /></div>
+              <div className="md:col-span-2"><label className="block text-sm font-bold text-gray-700 mb-2">Description (English)</label><textarea rows={4} required value={currentProduct.description_en} onChange={e => setCurrentProduct({...currentProduct, description_en: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-[#C5A059]" dir="ltr" /></div>
+
+              <div className="md:col-span-2 pt-6 border-t border-gray-100 flex gap-4">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-4 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors">
+                  {isRTL ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button type="submit" disabled={isSaving} className="flex-[2] py-4 bg-[#C5A059] text-white font-bold rounded-xl hover:bg-[#b08d4b] transition-colors disabled:opacity-70 flex justify-center items-center gap-2">
+                  {isSaving ? <Loader2 size={20} className="animate-spin" /> : <><Save size={20}/> {isRTL ? 'حفظ المنتج واعتماده' : 'Save Product'}</>}
+                </button>
+              </div>
             </form>
-
-            <div className="p-6 border-t border-gray-100 bg-white flex gap-3">
-              <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200">{t.cancel}</button>
-              <button type="button" onClick={handleSaveProduct} disabled={isSubmitting} className="flex-1 py-3 bg-[#C5A059] text-white font-bold rounded-xl hover:bg-[#b08d4b] flex justify-center items-center gap-2">
-                {isSubmitting ? <Loader2 className="animate-spin" size={20}/> : <><Save size={20}/> {t.save}</>}
-              </button>
-            </div>
           </div>
         </div>
       )}

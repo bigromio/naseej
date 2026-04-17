@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { supabase } from '@/lib/supabase';
-import { Loader2, Calendar, ShoppingBag, CheckCircle, XCircle, Clock, MessageCircle, Mail, AlertCircle, Phone } from 'lucide-react';
+import { Loader2, Calendar, ShoppingBag, CheckCircle, XCircle, Clock, ShoppingCart, Trash2, MessageCircle, Mail, AlertCircle, Phone } from 'lucide-react';
 import { triggerAutomation } from '@/lib/automations';
 
 export const AdminOrders = () => {
@@ -9,7 +9,8 @@ export const AdminOrders = () => {
   const isRTL = language === 'ar';
 
   // التبويب النشط (طلبات المتجر أو حجوزات المواعيد)
-  const [activeTab, setActiveTab] = useState<'orders' | 'appointments'>('appointments');
+  const [activeTab, setActiveTab] = useState<'orders' | 'appointments' | 'abandoned_carts'>('orders');
+  const [abandonedCarts, setAbandonedCarts] = useState<any[]>([]);
   
   // حالة الحجوزات
   const [appointments, setAppointments] = useState<any[]>([]);
@@ -92,6 +93,32 @@ export const AdminOrders = () => {
     }
   };
 
+
+  const fetchAbandonedCarts = async () => {
+  setIsLoading(true);
+  try {
+    // جلب السلات مع دمج بيانات العملاء من جدول users
+    const { data, error } = await supabase
+      .from('carts')
+      .select('*, users(full_name, phone, email)')
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+    setAbandonedCarts(data || []);
+  } catch (err: any) {
+    console.error(err.message);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+// تحديث الـ useEffect لجلب البيانات عند اختيار التبويب
+useEffect(() => {
+  if (activeTab === 'appointments') fetchAppointments();
+  if (activeTab === 'orders') fetchOrders();
+  if (activeTab === 'abandoned_carts') fetchAbandonedCarts(); // 👈 جلب السلات
+}, [activeTab]);
+
   // تحديث حالة الحجز (قبول / إلغاء) مع محاكاة إرسال الإشعارات
   const updateAppointmentStatus = async (id: string, newStatus: string, customerName: string, customerPhone: string) => {
     // 1. تحديث قاعدة البيانات
@@ -170,100 +197,17 @@ export const AdminOrders = () => {
         >
           <ShoppingBag size={20} /> {isRTL ? 'طلبات المتجر' : 'Store Orders'}
         </button>
+
+        <button onClick={() => setActiveTab('abandoned_carts')} className={`flex-1 py-5 font-bold flex justify-center gap-2 ${activeTab === 'abandoned_carts' ? 'bg-[#C5A059] text-white' : 'bg-gray-50 text-gray-500'}`}>
+          <ShoppingCart size={20} /> {isRTL ? 'السلات المتروكة' : 'Abandoned Carts'}
+        </button>
       </div>
 
       {/* محتوى التبويبات */}
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
         
         {/* ================================== */}
-        {/* تبويب الحجوزات */}
-        {/* ================================== */}
-        {activeTab === 'appointments' && (
-          <div className="p-0">
-            {isLoading ? (
-              <div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#C5A059]" size={40} /></div>
-            ) : appointments.length === 0 ? (
-              <div className="text-center py-20 text-gray-500">
-                <Calendar size={48} className="mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-bold">{isRTL ? 'لا توجد حجوزات حالياً.' : 'No appointments currently.'}</p>
-              </div>
-            ) : (
-              <table className="w-full text-start">
-                <thead className="bg-gray-50 border-b border-gray-100">
-                  <tr>
-                    <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'العميل' : 'Customer'}</th>
-                    <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'نوع الخدمة' : 'Service'}</th>
-                    <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'التاريخ والوقت' : 'Date & Time'}</th>
-                    <th className="p-4 text-center font-bold text-gray-600">{isRTL ? 'الحالة' : 'Status'}</th>
-                    <th className="p-4 text-center font-bold text-gray-600">{isRTL ? 'إجراءات' : 'Actions'}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {appointments.map((app) => (
-                    <tr key={app.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                      {/* العميل */}
-                      <td className="p-4">
-                        <div className="font-bold text-[#2C2C2C]">{app.customer_name}</div>
-                        <div className="text-sm text-gray-500 flex items-center gap-2 mt-1" dir="ltr">
-                          <Phone size={14} className="text-[#C5A059]"/> {app.customer_phone}
-                        </div>
-                      </td>
-                      
-                      {/* نوع الخدمة */}
-                      <td className="p-4">
-                        <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-lg text-sm font-bold">
-                          {app.service_type}
-                        </span>
-                      </td>
-
-                      {/* التاريخ والوقت */}
-                      <td className="p-4">
-                        <div className="font-bold text-[#2C2C2C] flex items-center gap-2">
-                          <Calendar size={16} className="text-[#C5A059]"/> {app.appointment_date}
-                        </div>
-                        <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
-                          <Clock size={16} className="text-[#C5A059]"/> {formatTime(app.appointment_time)}
-                        </div>
-                      </td>
-
-                      {/* الحالة */}
-                      <td className="p-4 text-center">
-                        {app.status === 'pending' && <span className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold"><Clock size={14}/> قيد المراجعة</span>}
-                        {app.status === 'confirmed' && <span className="inline-flex items-center gap-1 bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-bold"><CheckCircle size={14}/> مؤكد</span>}
-                        {app.status === 'cancelled' && <span className="inline-flex items-center gap-1 bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-bold"><XCircle size={14}/> ملغي</span>}
-                      </td>
-
-                      {/* إجراءات التأكيد والإلغاء */}
-                      <td className="p-4 text-center">
-                        {app.status === 'pending' ? (
-                          <div className="flex justify-center gap-2">
-                            <button 
-                              onClick={() => updateAppointmentStatus(app.id, 'confirmed', app.customer_name, app.customer_phone)}
-                              className="p-2 bg-green-50 text-green-600 hover:bg-green-500 hover:text-white rounded-xl transition-colors title='تأكيد وإرسال إشعار'"
-                            >
-                              <CheckCircle size={20} />
-                            </button>
-                            <button 
-                              onClick={() => updateAppointmentStatus(app.id, 'cancelled', app.customer_name, app.customer_phone)}
-                              className="p-2 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-colors title='إلغاء الموعد'"
-                            >
-                              <XCircle size={20} />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-gray-400 text-sm font-bold">تمت المعالجة</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-
-        {/* ================================== */}
-        {/* تبويب طلبات المتجر */}
+        {/* 1. تبويب طلبات المتجر */}
         {/* ================================== */}
         {activeTab === 'orders' && (
           <div className="p-0">
@@ -319,7 +263,148 @@ export const AdminOrders = () => {
           </div>
         )}
 
+        {/* ================================== */}
+        {/* 2. تبويب الحجوزات */}
+        {/* ================================== */}
+        {activeTab === 'appointments' && (
+          <div className="p-0">
+            {isLoading ? (
+              <div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#C5A059]" size={40} /></div>
+            ) : appointments.length === 0 ? (
+              <div className="text-center py-20 text-gray-500">
+                <Calendar size={48} className="mx-auto mb-4 opacity-50" />
+                <p className="text-lg font-bold">{isRTL ? 'لا توجد حجوزات حالياً.' : 'No appointments currently.'}</p>
+              </div>
+            ) : (
+              <table className="w-full text-start">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'العميل' : 'Customer'}</th>
+                    <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'نوع الخدمة' : 'Service'}</th>
+                    <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'التاريخ والوقت' : 'Date & Time'}</th>
+                    <th className="p-4 text-center font-bold text-gray-600">{isRTL ? 'الحالة' : 'Status'}</th>
+                    <th className="p-4 text-center font-bold text-gray-600">{isRTL ? 'إجراءات' : 'Actions'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {appointments.map((app) => (
+                    <tr key={app.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                      <td className="p-4">
+                        <div className="font-bold text-[#2C2C2C]">{app.customer_name}</div>
+                        <div className="text-sm text-gray-500 flex items-center gap-2 mt-1" dir="ltr">
+                          <Phone size={14} className="text-[#C5A059]"/> {app.customer_phone}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-lg text-sm font-bold">
+                          {app.service_type}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                        <div className="font-bold text-[#2C2C2C] flex items-center gap-2">
+                          <Calendar size={16} className="text-[#C5A059]"/> {app.appointment_date}
+                        </div>
+                        <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
+                          <Clock size={16} className="text-[#C5A059]"/> {formatTime(app.appointment_time)}
+                        </div>
+                      </td>
+                      <td className="p-4 text-center">
+                        {app.status === 'pending' && <span className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold"><Clock size={14}/> قيد المراجعة</span>}
+                        {app.status === 'confirmed' && <span className="inline-flex items-center gap-1 bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-bold"><CheckCircle size={14}/> مؤكد</span>}
+                        {app.status === 'cancelled' && <span className="inline-flex items-center gap-1 bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-bold"><XCircle size={14}/> ملغي</span>}
+                      </td>
+                      <td className="p-4 text-center">
+                        {app.status === 'pending' ? (
+                          <div className="flex justify-center gap-2">
+                            <button 
+                              onClick={() => updateAppointmentStatus(app.id, 'confirmed', app.customer_name, app.customer_phone)}
+                              className="p-2 bg-green-50 text-green-600 hover:bg-green-500 hover:text-white rounded-xl transition-colors title='تأكيد وإرسال إشعار'"
+                            >
+                              <CheckCircle size={20} />
+                            </button>
+                            <button 
+                              onClick={() => updateAppointmentStatus(app.id, 'cancelled', app.customer_name, app.customer_phone)}
+                              className="p-2 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-colors title='إلغاء الموعد'"
+                            >
+                              <XCircle size={20} />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-sm font-bold">تمت المعالجة</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* ================================== */}
+        {/* 3. تبويب السلة المتروكة */}
+        {/* ================================== */}
+        {activeTab === 'abandoned_carts' && (
+          <div className="p-0 animate-in fade-in">
+            <div className="flex justify-between items-center p-4 bg-red-50 border-b border-red-100">
+              <div className="text-red-800 text-sm font-bold">
+                {isRTL ? 'إدارة السلات القديمة والمنسية' : 'Manage old abandoned carts'}
+              </div>
+              <button 
+                onClick={async () => {
+                  if(!confirm(isRTL ? 'حذف جميع السلات غير المسجلة القديمة؟' : 'Delete all old unregistered carts?')) return;
+                  await supabase.from('carts').delete().is('user_id', null);
+                  fetchAbandonedCarts();
+                }}
+                className="text-xs bg-red-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-red-700 transition-colors"
+              >
+                {isRTL ? 'حذف السلات غير المسجلة' : 'Clear Unregistered'}
+              </button>
+            </div>
+
+            <table className="w-full text-start">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'صاحب السلة' : 'Owner'}</th>
+                  <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'محتويات السلة' : 'Items'}</th>
+                  <th className="p-4 text-start font-bold text-gray-600">{isRTL ? 'آخر تحديث' : 'Last Activity'}</th>
+                  <th className="p-4 text-center font-bold text-gray-600">{isRTL ? 'إجراءات' : 'Actions'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {abandonedCarts.map((cart) => (
+                  <tr key={cart.session_id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                    <td className="p-4">
+                      <div className="font-bold text-[#2C2C2C]">{cart.users?.full_name || (isRTL ? 'زائر غير مسجل' : 'Guest')}</div>
+                      <div className="text-xs text-gray-500 mt-1" dir="ltr">{cart.users?.phone || cart.session_id}</div>
+                    </td>
+                    <td className="p-4">
+                      <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-lg text-sm font-bold border border-gray-200">
+                        {cart.items?.length || 0} {isRTL ? 'منتجات' : 'items'}
+                      </span>
+                    </td>
+                    <td className="p-4 text-sm text-gray-500 font-medium">
+                      {new Date(cart.updated_at).toLocaleString(isRTL ? 'ar-SA' : 'en-US')}
+                    </td>
+                    <td className="p-4 text-center">
+                      <button 
+                        onClick={async () => {
+                          await supabase.from('carts').delete().eq('session_id', cart.session_id);
+                          fetchAbandonedCarts();
+                        }}
+                        className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors title='حذف السلة'"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
       </div>
-    </div>
+          </div>
   );
 };

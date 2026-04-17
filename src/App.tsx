@@ -25,6 +25,7 @@ import { CartDrawer } from '@/components/CartDrawer';
 
 // Pages - Admin
 import { AdminDashboard } from '@/pages/AdminDashboard';
+import { AdminSuppliers } from '@/pages/AdminSuppliers';
 import { AdminProducts } from '@/pages/AdminProducts';
 import { AdminOffers } from '@/pages/AdminOffers';
 import { AdminCampaigns } from '@/pages/AdminCampaigns';
@@ -96,6 +97,7 @@ export default function App() {
         }>
           {/* المرحلة 1: الفريق والعملاء */}
           <Route index element={<AdminDashboard />} />
+          <Route path="suppliers" element={<AdminSuppliers />} /> {/* 👈 أضفنا المسار هنا */}
           
           {/* المرحلة 2: المنتجات والعروض */}
           <Route path="products" element={<AdminProducts />} />

@@ -3,13 +3,17 @@ import { supabase } from './supabase';
 const NOTIFICATION_API = 'http://167.86.73.97:8080/send';
 
 // قائمة الإجراءات (الأحداث) المعرفة في النظام
+// 🌟 قائمة الأحداث المعتمدة في النظام 🌟
 export const SYSTEM_EVENTS = {
-  order_confirmed: 'تأكيد الطلب الجديد',
-  order_shipped: 'تم شحن الطلب',
-  appointment_booked: 'تأكيد حجز موعد',
-  appointment_reminder: 'تذكير بموعد قريب',
-  welcome_msg: 'رسالة ترحيب بالتسجيل',
-  custom: 'إجراء مخصص (Custom)'
+  welcome_msg: 'رسالة ترحيبية (Welcome Message)',
+  order_confirmed: 'تأكيد الطلب (Order Confirmed)',
+  order_shipped: 'تم الشحن (Order Shipped)',
+  order_delivered: 'تم التوصيل (Order Delivered)', 
+  abandoned_cart: 'السلة المتروكة (Abandoned Cart)', 
+  manufacturing_update: 'تحديث التصنيع (Manufacturing Update)',
+  appointment_booked: 'تأكيد الموعد (Appointment Confirmed)',
+  appointment_rescheduled: 'تعديل الموعد (Appointment Rescheduled)',
+  custom_campaign: 'حملة مخصصة (Custom Campaign)'
 };
 
 interface TriggerProps {

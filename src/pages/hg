@@ -329,6 +329,141 @@ app.post('/api/server/restart', (req, res) => {
 });
 
 const PORT = 8080;
+// ==========================================
+// 6. المراقب الآلي للسلات المتروكة (النسخة المتطورة)
+// ==========================================
+async function checkAbandonedCarts() {
+    try {
+        // 1. جلب جميع قوالب السلة المتروكة المفعلة من جدول القوالب الجديد
+        const { data: templates } = await supabase
+            .from('notification_templates')
+            .select('*')
+            .like('event_name', 'abandoned_cart_%')
+            .eq('is_active', true);
+
+        if (!templates || templates.length === 0) return;
+
+        const now = new Date();
+
+        for (const tpl of templates) {
+            const brand = tpl.project_name;
+            const delayHours = tpl.delay_hours || 2; // أخذ الوقت الديناميكي الذي حددته أنت من لوحة التحكم
+            
+            // 2. حساب الوقت: السلات التي تم تركها قبل (X) ساعة
+            const targetTime = new Date(now.getTime() - delayHours * 60 * 60 * 1000).toISOString();
+
+            // 3. تحديد هل هذا الإشعار الأول أم الثاني بناءً على اسم الحدث
+            const isFirst = tpl.event_name === 'abandoned_cart_1';
+            const notifyField = isFirst ? 'notified_2h' : 'notified_24h';
+
+            // 4. جلب السلات التي ينطبق عليها الشرط
+            const { data: carts } = await supabase.from('carts')
+                .select('*, users!inner(full_name, phone)') // يجب أن يكون العميل مسجلاً
+                .eq(notifyField, false)
+                .lt('updated_at', targetTime);
+
+            for (const cart of (carts || [])) {
+                console.log(`🛒 [سلة متروكة] إرسال تنبيه (${tpl.event_name}) لعميل: ${cart.users.full_name}`);
+                
+                let msg = (tpl.content_ar || '').replace(/{{customer_name}}/g, cart.users.full_name);
+                
+                const client = waClients.get(brand);
+                if (client && cart.users.phone && msg) {
+                    let cleanPhone = cart.users.phone.replace(/\D/g, '');
+                    if (cleanPhone.startsWith('05')) cleanPhone = '966' + cleanPhone.substring(1);
+                    const chatId = `${cleanPhone}@c.us`;
+                    try {
+                        await client.sendMessage(chatId, msg);
+                    } catch (err) { console.error(`⚠️ فشل إرسال تنبيه السلة لـ ${cleanPhone}`); }
+                }
+                
+                // 5. وضع علامة (تم الإرسال) لمنع التكرار المزعج
+                await supabase.from('carts').update({ [notifyField]: true }).eq('session_id', cart.session_id);
+            }
+        }
+    } catch (err) {
+        console.error('❌ خطأ في محرك السلات المتروكة:', err.message);
+    }
+}
+
+// تشغيل المراقب كل 15 دقيقة (900000 مللي ثانية) لعدم إرهاق السيرفر
+setInterval(checkAbandonedCarts, 15 * 60 * 1000);
+
+// ==========================================
+// 7. محرك استيراد المنتجات (Dropshipping Importer API)
+// ==========================================
+app.post('/api/supplier/import', async (req, res) => {
+    const { sku, supplier_id } = req.body;
+
+    if (!sku || !supplier_id) {
+        return res.status(400).json({ success: false, error: 'رقم المنتج (SKU) ومعرف المورد مطلوبان.' });
+    }
+
+    console.log(`\n📦 [دروبشيبينج] طلب استيراد منتج (${sku}) من المورد (${supplier_id})...`);
+
+    try {
+        // 1. جلب مفتاح الـ API للمورد بأمان من قاعدة البيانات
+        const { data: supplier, error: dbError } = await supabase
+            .from('suppliers')
+            .select('api_key, type')
+            .eq('id', supplier_id)
+            .single();
+
+        if (dbError || !supplier || !supplier.api_key) {
+            return res.status(404).json({ success: false, error: 'مفتاح الربط (API Key) غير موجود لهذا المورد.' });
+        }
+
+        // 2. الاتصال بسيرفرات المورد (CJ Dropshipping API كمثال قياسي)
+        // ملاحظة: قد يختلف الرابط الدقيق حسب تحديثات CJ، لكن هذا هو الهيكل المعتمد
+        const apiUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/query?pid=${sku}`;
+        
+        const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'CJ-Access-Token': supplier.api_key // تمرير المفتاح السري هنا
+            }
+        });
+
+        const responseData = await response.json();
+
+        // التحقق من نجاح الرد من CJ
+        if (responseData.code !== 200 || !responseData.data) {
+             return res.status(400).json({ 
+                 success: false, 
+                 error: 'المنتج غير موجود أو انتهت صلاحية مفتاح الـ API.', 
+                 details: responseData 
+             });
+        }
+
+        const cjProduct = responseData.data; 
+
+        // 3. تنظيف البيانات وترتيبها لتناسب هيكل قاعدة بيانات "نسيج"
+        // (يقوم السيرفر باستخلاص البيانات الهامة فقط ويرمي الباقي)
+        const mappedProduct = {
+            name_en: cjProduct.productNameEn || '',
+            name_ar: cjProduct.productNameEn || '', // يمكنك لاحقاً ربطها بمترجم آلي
+            description_en: cjProduct.description || '',
+            supply_price: parseFloat(cjProduct.sellPrice || 0), // تكلفة المنتج علينا من المورد
+            price: 0, // نتركها 0 ليقوم الأدمن بتسعيرها وتحديد الربح
+            stock: parseInt(cjProduct.inventory || 100),
+            category: 'أثاث', // تصنيف افتراضي
+            images: cjProduct.productImageSet ? cjProduct.productImageSet.slice(0, 4) : [], // نأخذ أول 4 صور
+            supplier_id: supplier_id,
+            sku: sku // حفظ رقم المنتج لسهولة تتبعه
+        };
+
+        console.log(`✅ [دروبشيبينج] تم استيراد المنتج بنجاح: ${mappedProduct.name_en}`);
+        
+        // 4. إرسال المنتج المنظف للمتجر (لكي يعرضه للأدمن للموافقة والتسعير)
+        res.json({ success: true, product: mappedProduct });
+
+    } catch (error) {
+        console.error('❌ [دروبشيبينج] خطأ في استيراد المنتج:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`\n🚀 سيرفر الإشعارات المركزي (Multi-Tenant) يعمل بامتياز على بورت ${PORT}`);
 });

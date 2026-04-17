@@ -61,6 +61,30 @@ export interface CartItem extends Product {
   quantity: number;
 }
 
+// 🌟 دالة مساعدة لتوليد جلسة للعميل (حتى لو كان زائراً غير مسجل) 🌟
+const getSessionId = () => {
+  let sid = localStorage.getItem('naseej_session');
+  if (!sid) {
+    sid = 'sess_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('naseej_session', sid);
+  }
+  return sid;
+};
+
+// 🌟 دالة مساعدة لرفع السلة لقاعدة البيانات (لصيد السلات المتروكة) 🌟
+const syncCartToDB = async (cart: CartItem[], userId?: string) => {
+  try {
+    await supabase.from('carts').upsert({
+      session_id: getSessionId(),
+      user_id: userId || null,
+      items: cart,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'session_id' });
+  } catch (err) {
+    console.error('Error syncing cart:', err);
+  }
+};
+
 interface StoreState {
   language: 'ar' | 'en';
   setLanguage: (lang: 'ar' | 'en') => void;
@@ -85,6 +109,7 @@ interface StoreState {
   removeFromCart: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => void;
   clearCart: () => void;
+  initCart: () => Promise<void>;
   // إعدادات الموقع (للبنرات والبوب-أب)
   siteSettings: any;
   fetchSiteSettings: () => Promise<void>;
@@ -98,7 +123,7 @@ interface StoreState {
 }
 
 
-export const useStore = create<StoreState>((set) => ({
+export const useStore = create<StoreState>((set, get) => ({ // 👈 أضفنا get هنا
   language: 'ar',
   setLanguage: (lang) => set({ language: lang }),
   
@@ -110,23 +135,33 @@ export const useStore = create<StoreState>((set) => ({
   setUser: (user) => {
     if (user) {
       localStorage.setItem('naseej_user', JSON.stringify(user));
+      // ربط سلة الزائر بحسابه فور تسجيل الدخول
+      syncCartToDB(useStore.getState().cart, user.id);
     } else {
       localStorage.removeItem('naseej_user');
     }
     set({ user, loginTimestamp: user ? Date.now() : null });
   },
   
-  checkSession: () => set((state) => {
-    if (state.user && state.loginTimestamp) {
-      // 20 دقيقة = 20 * 60 * 1000 مللي ثانية
-      const isExpired = (Date.now() - state.loginTimestamp) > 20 * 60 * 1000;
-      if (isExpired) {
-        alert(state.language === 'ar' ? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.' : 'Session expired. Please login again.');
-        return { user: null, loginTimestamp: null };
+  checkSession: () => {
+    const { user, setUser } = get();
+    if (user) {
+      const lastActivity = localStorage.getItem('naseej_last_activity');
+      const now = new Date().getTime();
+      
+      // إذا مر 24 ساعة (86400000 مللي ثانية) على آخر نشاط، يتم طرد المستخدم
+      if (lastActivity && now - parseInt(lastActivity) > 86400000) {
+        alert('انتهت صلاحية الجلسة لأسباب أمنية، يرجى تسجيل الدخول من جديد.');
+        setUser(null); 
+        localStorage.removeItem('naseej-storage'); // مسح التخزين المحلي تماماً
+        localStorage.removeItem('naseej_last_activity');
+        window.location.href = '/auth'; // إجباره على العودة لصفحة الدخول
+      } else {
+        // تحديث وقت آخر نشاط
+        localStorage.setItem('naseej_last_activity', now.toString());
       }
     }
-    return state; // إذا لم تنتهِ الجلسة، أعد الحالة كما هي
-  }),
+  },
   
   products: [],
   isLoadingProducts: false,
@@ -150,32 +185,49 @@ export const useStore = create<StoreState>((set) => ({
   },
 
   // تنفيذ نظام السلة العائمة
+  // 🌟 تنفيذ نظام السلة الذكي (المربوط بقاعدة البيانات) 🌟
   cart: [],
   isCartOpen: false,
   openCart: () => set({ isCartOpen: true }),
   closeCart: () => set({ isCartOpen: false }),
   
+  // جلب السلة من قاعدة البيانات عند فتح الموقع
+  initCart: async () => {
+    try {
+      const { data } = await supabase.from('carts').select('items').eq('session_id', getSessionId()).single();
+      if (data && data.items) {
+        set({ cart: data.items });
+      }
+    } catch (e) { console.error(e); }
+  },
+  
   addToCart: (product, quantity = 1) => set((state) => {
     const existing = state.cart.find(item => item.id === product.id);
-    if (existing) {
-      // إذا كان المنتج موجوداً، نزيد الكمية ونفتح السلة تلقائياً
-      return { 
-        cart: state.cart.map(item => item.id === product.id ? { ...item, quantity: item.quantity + quantity } : item),
-        isCartOpen: true 
-      };
-    }
-    // إذا كان منتجاً جديداً
-    return { cart: [...state.cart, { ...product, quantity }], isCartOpen: true };
+    const newCart = existing 
+      ? state.cart.map(item => item.id === product.id ? { ...item, quantity: item.quantity + quantity } : item)
+      : [...state.cart, { ...product, quantity }];
+    
+    syncCartToDB(newCart, state.user?.id); // رفع السلة للقاعدة
+    return { cart: newCart, isCartOpen: true };
   }),
   
-  removeFromCart: (productId) => set((state) => ({
-    cart: state.cart.filter(item => item.id !== productId)
-  })),
+  removeFromCart: (productId) => set((state) => {
+    const newCart = state.cart.filter(item => item.id !== productId);
+    syncCartToDB(newCart, state.user?.id); // تحديث القاعدة
+    return { cart: newCart };
+  }),
   
-  updateQuantity: (id, quantity) => set((state) => ({
-    cart: state.cart.map(item => item.id === id ? { ...item, quantity: Math.max(1, quantity) } : item)
-  })),
-  clearCart: () => set({ cart: [] }),
+  updateQuantity: (id, quantity) => set((state) => {
+    const newCart = state.cart.map(item => item.id === id ? { ...item, quantity: Math.max(1, quantity) } : item);
+    syncCartToDB(newCart, state.user?.id); // تحديث القاعدة
+    return { cart: newCart };
+  }),
+  
+  clearCart: () => set((state) => {
+    syncCartToDB([], state.user?.id); // تفريغ السلة من القاعدة بعد الشراء
+    return { cart: [] };
+  }),
+
   siteSettings: {},
   fetchSiteSettings: async () => {
     try {

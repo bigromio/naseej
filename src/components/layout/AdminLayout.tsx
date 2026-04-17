@@ -24,18 +24,22 @@ export const AdminLayout = () => {
   const text = {
     ar: {
       commandCenter: 'مركز القيادة', backToStore: 'العودة للمتجر',
-      myDashboard: 'لوحة معلوماتي', logout: 'تسجيل الخروج', // <-- تم التعديل هنا
+      myDashboard: 'لوحة معلوماتي', logout: 'تسجيل الخروج',
       nav: {
-        team: 'الفريق والعملاء', products: 'إدارة المنتجات', offers: 'العروض والخصومات',
+        team: 'الفريق والعملاء', 
+        suppliers: 'الموردين والشركاء', // 👈 أضفنا الترجمة هنا
+        products: 'إدارة المنتجات', offers: 'العروض والخصومات',
         appearance: 'مظهر المتجر', 
         orders: 'الطلبات واللوجستيات', campaigns: 'الحملات التسويقية', analytics: 'التحليلات والأداء'
       }
     },
     en: {
       commandCenter: 'Command Center', backToStore: 'Back to Store',
-      myDashboard: 'My Dashboard', logout: 'Logout', // <-- تم التعديل هنا
+      myDashboard: 'My Dashboard', logout: 'Logout',
       nav: {
-        team: 'HR & CRM', products: 'Products Catalog', offers: 'Offers & Discounts',
+        team: 'HR & CRM', 
+        suppliers: 'Suppliers & Partners', // 👈 أضفنا الترجمة هنا
+        products: 'Products Catalog', offers: 'Offers & Discounts',
         appearance: 'Store Appearance', 
         orders: 'Orders & Logistics', campaigns: 'Marketing Campaigns', analytics: 'Analytics & Perf.'
       }
@@ -44,9 +48,10 @@ export const AdminLayout = () => {
 
   const t = text[language as keyof typeof text];
 
-  // تم فصل المنتجات والعروض هنا
+  // 🌟 إضافة الموردين للقائمة الجانبية 🌟
   const navItems = [
     { path: '/admin', icon: Users, label: t.nav.team },
+    { path: '/admin/suppliers', icon: Store, label: t.nav.suppliers }, // 👈 التبويب الجديد
     { path: '/admin/products', icon: Package, label: t.nav.products },
     { path: '/admin/offers', icon: Tag, label: t.nav.offers },
     { path: '/admin/appearance', icon: Paintbrush, label: t.nav.appearance },
