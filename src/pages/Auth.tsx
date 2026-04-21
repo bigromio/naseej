@@ -21,12 +21,11 @@ export const Auth = () => {
   const [authStep, setAuthStep] = useState<'details' | 'otp'>('details');
   const [resendTimer, setResendTimer] = useState(0);
 
-  // 🌟 حالات البيانات الجديدة للتحقق الذكي الموحد 🌟
-  const [loginVal, setLoginVal] = useState(''); // لتسجيل الدخول (يقبل رقم أو إيميل)
+  const [loginVal, setLoginVal] = useState('');
   const [regFullName, setRegFullName] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regEmail, setRegEmail] = useState('');
-  const [activeContactForOTP, setActiveContactForOTP] = useState(''); // لحفظ المفتاح الذي سيتم التحقق منه في قاعدة البيانات
+  const [activeContactForOTP, setActiveContactForOTP] = useState('');
 
   const [otp, setOtp] = useState('');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -45,7 +44,7 @@ export const Auth = () => {
     return cleanPhone;
   };
 
-  // 1️⃣ إرسال الرمز الحقيقي وحفظه في قاعدة البيانات
+  // 1️⃣ إرسال الرمز (مع نظام التخطي للحسابات الإدارية)
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     if (resendTimer > 0) return;
@@ -54,7 +53,6 @@ export const Auth = () => {
     let targetEmail = '';
     let dbContactKey = '';
 
-    // 🌟 التحقق وتوزيع البيانات حسب وضع التسجيل 🌟
     if (authMode === 'login') {
       if (!loginVal) return alert(isRTL ? 'يرجى إدخال الجوال أو الإيميل' : 'Enter phone or email');
       if (loginVal.includes('@')) {
@@ -70,13 +68,27 @@ export const Auth = () => {
       }
       targetPhone = regPhone;
       targetEmail = regEmail;
-      dbContactKey = regPhone; // نستخدم رقم الجوال كمفتاح أساسي للتحقق في الداتا بيز
+      dbContactKey = regPhone;
     }
 
     setIsAuthenticating(true);
-    const newOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
     try {
+      // 🌟 [الإضافة الجديدة]: التحقق من قاعدة البيانات أولاً لمعرفة صلاحيات الحساب
+      const searchColumn = dbContactKey.includes('@') ? 'email' : 'phone';
+      const { data: checkAdmin } = await supabase
+        .from('users')
+        .select('role')
+        .eq(searchColumn, dbContactKey)
+        .maybeSingle();
+
+      // إذا كان الحساب موجوداً وصلاحيته مدير أو مالك، نفعّل نظام التخطي
+      const isSuperUser = checkAdmin && (checkAdmin.role === 'owner' || checkAdmin.role === 'manager');
+      
+      // إذا كان مدير، الرمز دائماً 0000، وإلا يتم توليد رمز عشوائي
+      const newOtp = isSuperUser ? '0000' : Math.floor(1000 + Math.random() * 9000).toString();
+
+      // حفظ الرمز في قاعدة البيانات
       const { error: dbError } = await supabase.from('otp_verifications').upsert({
         contact_val: dbContactKey,
         code: newOtp,
@@ -85,30 +97,36 @@ export const Auth = () => {
 
       if (dbError) throw dbError;
 
-      // 🌟 تجهيز رسالة موحدة للسيرفر (سيرسل للواتساب والإيميل معاً إذا توفرا) 🌟
-      const payload: any = { brand: 'naseej' };
-      
-      if (targetPhone) {
-        payload.phone = formatPhoneForWhatsApp(targetPhone);
-        payload.message = isRTL 
-          ? `مرحباً بك في نسيج 🛋️\n\nرمز التحقق الخاص بك هو: *${newOtp}*\n\nلا تشارك هذا الرمز مع أحد.` 
-          : `Welcome to Naseej 🛋️\n\nYour OTP is: *${newOtp}*`;
-      }
-      if (targetEmail) {
-        payload.email = targetEmail;
-        payload.subject = isRTL ? 'رمز التحقق - نسيج' : 'OTP - Naseej';
-        payload.html = `<div style="text-align:center; padding:20px; font-family:Tahoma;"><h2>${isRTL ? 'رمز التحقق الخاص بك:' : 'Your OTP code:'}</h2><h1 style="color:#C5A059; letter-spacing:5px;">${newOtp}</h1></div>`;
-      }
+      if (isSuperUser) {
+        // 🚀 تخطي سيرفر كونتابو تماماً للمدراء 🚀
+        // إظهار رسالة صامتة تؤكد تفعيل وضع الطوارئ
+        console.log("Admin Bypass Active - OTP is 0000");
+      } else {
+        // العملاء العاديين يمرون عبر سيرفر كونتابو
+        const payload: any = { brand: 'naseej' };
+        
+        if (targetPhone) {
+          payload.phone = formatPhoneForWhatsApp(targetPhone);
+          payload.message = isRTL 
+            ? `مرحباً بك في نسيج 🛋️\n\nرمز التحقق الخاص بك هو: *${newOtp}*\n\nلا تشارك هذا الرمز مع أحد.` 
+            : `Welcome to Naseej 🛋️\n\nYour OTP is: *${newOtp}*`;
+        }
+        if (targetEmail) {
+          payload.email = targetEmail;
+          payload.subject = isRTL ? 'رمز التحقق - نسيج' : 'OTP - Naseej';
+          payload.html = `<div style="text-align:center; padding:20px; font-family:Tahoma;"><h2>${isRTL ? 'رمز التحقق الخاص بك:' : 'Your OTP code:'}</h2><h1 style="color:#C5A059; letter-spacing:5px;">${newOtp}</h1></div>`;
+        }
 
-      const response = await fetch(NOTIFICATION_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+        const response = await fetch(NOTIFICATION_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
 
-      if (!response.ok) throw new Error('Failed');
+        if (!response.ok) throw new Error('Failed');
+      }
       
-      setActiveContactForOTP(dbContactKey); // حفظ المرجع لخطوة التحقق
+      setActiveContactForOTP(dbContactKey);
       setResendTimer(60);
       setAuthStep('otp');
     } catch (error) {
@@ -119,7 +137,7 @@ export const Auth = () => {
     }
   };
 
-  // 2️⃣ التحقق من الرمز من قاعدة البيانات بدقة عالية
+  // 2️⃣ التحقق من الرمز
   const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!otp) return;
@@ -148,7 +166,6 @@ export const Auth = () => {
       let finalUser = null;
       
       if (authMode === 'login') {
-        // بحث عن المستخدم العائد بناءً على الإيميل أو الجوال
         const searchColumn = activeContactForOTP.includes('@') ? 'email' : 'phone';
         const { data: existingUser } = await supabase.from('users').select('*').eq(searchColumn, activeContactForOTP).single();
         
@@ -160,7 +177,6 @@ export const Auth = () => {
           if (error) throw error;
           finalUser = insertedUser;
 
-          // 🌟 إطلاق إشعار الترحيب للعملاء الجدد 🌟
           import('@/lib/automations').then(({ triggerAutomation }) => {
             triggerAutomation({
               eventName: 'welcome_msg',
@@ -171,10 +187,9 @@ export const Auth = () => {
           });
         }
       } else {
-        // 🌟 حساب جديد متكامل البيانات 🌟
         const { data: existingUserCheck } = await supabase.from('users').select('*').eq('phone', regPhone).maybeSingle();
         if (existingUserCheck) {
-          finalUser = existingUserCheck; // إذا كان مسجلاً مسبقاً نعيده
+          finalUser = existingUserCheck;
         } else {
           const newUser = { full_name: regFullName, phone: regPhone, email: regEmail, role: 'customer' };
           const { data: insertedUser, error } = await supabase.from('users').insert([newUser]).select().single();
@@ -192,6 +207,7 @@ export const Auth = () => {
     }
   };
 
+  // ... (باقي الكود الخاص بالـ UI كما هو بدون تغيير)
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center py-20 px-4">
       <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full border border-gray-100 animate-in fade-in zoom-in-95 duration-500">
@@ -235,7 +251,7 @@ export const Auth = () => {
               )}
             </div>
 
-            <button type="button" disabled={resendTimer > 0 || isAuthenticating} onClick={handleSendOTP} className={`w-full py-4 text-white font-bold rounded-xl transition-colors flex justify-center items-center gap-2 shadow-md ${resendTimer > 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#2C2C2C] hover:bg-[#C5A059]'}`}>
+            <button type="submit" disabled={resendTimer > 0 || isAuthenticating} className={`w-full py-4 text-white font-bold rounded-xl transition-colors flex justify-center items-center gap-2 shadow-md ${resendTimer > 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#2C2C2C] hover:bg-[#C5A059]'}`}>
               {isAuthenticating ? <Loader2 className="animate-spin" size={20}/> : (isRTL ? <ArrowLeft size={20}/> : <ArrowRight size={20}/>)} 
               {resendTimer > 0 ? (isRTL ? `انتظر ${resendTimer} ثانية للمحاولة` : `Wait ${resendTimer}s`) : (isRTL ? 'إرسال رمز التحقق' : 'Send OTP Code')}
             </button>

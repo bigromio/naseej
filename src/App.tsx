@@ -6,6 +6,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useStore } from '@/store/useStore';
+import ScrollToTop from '@/components/ScrollToTop';
 
 // Layouts
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -69,6 +70,7 @@ export default function App() {
 
   return (
     <Router>
+      <ScrollToTop />
       <CartDrawer /> {/* <--- تم وضع السلة العائمة هنا */}
       <Routes>
         {/* Public Routes with Main Layout */}

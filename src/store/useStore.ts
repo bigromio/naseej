@@ -48,13 +48,23 @@ export interface Product {
   long_desc_ar: string;
   long_desc_en: string;
   base_price: number;
-  discount_price?: number | null; // السعر بعد الخصم
+  discount_price?: number | null;
+  supply_price?: number; // التكلفة التي ذكرتها
   image_lifestyle: string;
-  image_white_bg?: string;
-  gallery?: string[]; // معرض الصور
-  video_url?: string; // رابط الفيديو
+  image_blueprint?: string; // الذي نضع فيه البرومبت حالياً
+  video_url?: string;
+  gallery?: string[] | string; // مصفوفة أو نص مفصول بـ |
   is_dynamic_size: boolean;
+  is_active: boolean;
   collection_id?: string;
+  collection_name_ar?: string; // العمود الجديد للمجموعات
+  collection_name_en?: string;
+  
+  // 🌟 إضافة هذه الخصائص لحل الخطأ 🌟
+  width_cm: number;
+  length_cm: number;
+  height_cm: number;
+  weight_kg?: number; // عمود الوزن الذي ستحتاجه
 }
 
 export interface CartItem extends Product {
